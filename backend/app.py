@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Procura v3.3 - Backend Flask + Neon PostgreSQL
-Reconhecimento facial via Hugging Face Inference API
+Reconhecimento facial via Hugging Face Inference API (CLIP)
 """
 import os
 import base64
@@ -34,8 +34,9 @@ FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 PORT = int(os.environ.get("PORT", 5000))
 
-FACE_THRESHOLD = 0.6
-HF_MODEL = "https://api-inference.huggingface.co/models/opencv/face_recognition"
+# Modelo CLIP da OpenAI — gera embeddings de imagem (512 floats)
+HF_MODEL = "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32"
+FACE_THRESHOLD = 0.25   # CLIP usa distância diferente; calibrável
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL nao configurada")
@@ -112,35 +113,45 @@ def verificar_senha(senha: str, hash_arm: str) -> bool:
     return False
 
 # ============================================================
-# FACE — Hugging Face Inference API
+# FACE — Hugging Face CLIP
 # ============================================================
 def gerar_embedding(img_bytes: bytes):
-    """Chama o Hugging Face para gerar embedding de rosto."""
+    """
+    Gera embedding de imagem via Hugging Face CLIP.
+    Retorna vetor numpy float32 (512 dimensões) ou None.
+    """
     if not HF_TOKEN:
         return None
     try:
-        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-        res = requests.post(HF_MODEL, headers=headers, data=img_bytes, timeout=30)
+        headers = {
+            "Authorization": f"Bearer {HF_TOKEN}",
+            "Content-Type": "application/octet-stream"
+        }
+        res = requests.post(HF_MODEL, headers=headers, data=img_bytes, timeout=60)
 
         if res.status_code != 200:
-            print(f"[HF] status {res.status_code}: {res.text[:200]}")
+            print(f"[HF] status {res.status_code}: {res.text[:300]}")
             return None
 
         dados = res.json()
 
-        # Formato 1: {"embeddings": [[...]], "num_faces": N}
+        # Formato 1: {"embedding": [512 floats]}
         if isinstance(dados, dict):
-            embs = dados.get("embeddings") or dados.get("embedding")
-            if embs:
-                if isinstance(embs[0], list):
-                    return np.array(embs[0], dtype=np.float32)
-                return np.array(embs, dtype=np.float32)
+            emb = dados.get("embedding") or dados.get("embeddings")
+            if emb:
+                if isinstance(emb[0], list):
+                    return np.array(emb[0], dtype=np.float32)
+                return np.array(emb, dtype=np.float32)
+            return None
 
-        # Formato 2: lista direta
-        if isinstance(dados, list) and len(dados) > 0:
+        # Formato 2: [512 floats]
+        if isinstance(dados, list):
+            if len(dados) == 0:
+                return None
             if isinstance(dados[0], list):
                 return np.array(dados[0], dtype=np.float32)
-            return np.array(dados, dtype=np.float32)
+            if isinstance(dados[0], (int, float)):
+                return np.array(dados, dtype=np.float32)
 
         return None
     except Exception as e:
@@ -158,6 +169,15 @@ def blob_para_embedding(blob):
     if isinstance(blob, memoryview):
         blob = bytes(blob)
     return np.frombuffer(blob, dtype=np.float32)
+
+def normalizar_embedding(emb):
+    """Normaliza para comparação por cosseno."""
+    if emb is None:
+        return None
+    norm = np.linalg.norm(emb)
+    if norm == 0:
+        return emb
+    return emb / norm
 
 # ============================================================
 # AUDITORIA
@@ -179,8 +199,9 @@ def registrar_auditoria(usuario, acao, alvo_id=None, detalhes=""):
 def home():
     return jsonify({
         "app": "Sistema de Procura API",
-        "version": "3.3",
+        "version": "3.4",
         "face_recognition": FACE_OK,
+        "modelo": "CLIP ViT-B/32",
         "bcrypt": BCRYPT_OK,
         "status": "online"
     })
@@ -360,7 +381,7 @@ def excluir_registro(rid):
     return jsonify({"ok": True})
 
 # ============================================================
-# ROTAS — BUSCA FACIAL
+# ROTAS — BUSCA POR IMAGEM (CLIP)
 # ============================================================
 @app.route("/api/busca-facial", methods=["POST"])
 def busca_facial():
@@ -384,10 +405,12 @@ def busca_facial():
 
     if enc_entrada is None:
         return jsonify({
-            "erro": "Nenhum rosto detectado na imagem",
+            "erro": "Nao foi possivel gerar embedding da imagem. Verifique se o HF esta online.",
             "matches": [],
             "disponivel": True
         }), 400
+
+    enc_entrada_norm = normalizar_embedding(enc_entrada)
 
     fotos = query_all("""
         SELECT f.registro_id, f.embedding, r.nome
@@ -400,17 +423,19 @@ def busca_facial():
     for f in fotos:
         try:
             emb_db = blob_para_embedding(f["embedding"])
-            if emb_db is None:
+            if emb_db is None or len(emb_db) != len(enc_entrada):
                 continue
-            if len(emb_db) != len(enc_entrada):
-                continue
-            dist = float(np.linalg.norm(enc_entrada - emb_db))
+            emb_db_norm = normalizar_embedding(emb_db)
+            # Similaridade de cosseno (1 - cos_dist)
+            cos_sim = float(np.dot(enc_entrada_norm, emb_db_norm))
+            # Converte para distância (quanto menor, mais parecido)
+            dist = 1.0 - cos_sim
             if dist <= FACE_THRESHOLD:
                 matches.append({
                     "registro_id": f["registro_id"],
                     "nome": f["nome"],
                     "distancia": dist,
-                    "similaridade": max(0.0, 1.0 - dist)
+                    "similaridade": max(0.0, cos_sim)
                 })
         except Exception as e:
             print(f"[MATCH] {e}")
@@ -423,7 +448,7 @@ def busca_facial():
             por_reg[rid] = m
 
     ordenados = sorted(por_reg.values(), key=lambda x: -x["similaridade"])[:3]
-    registrar_auditoria("?", "BUSCA_FACIAL", detalhes=f"{len(ordenados)} match(es)")
+    registrar_auditoria("?", "BUSCA_IMAGEM", detalhes=f"{len(ordenados)} match(es)")
     return jsonify({"matches": ordenados, "disponivel": True})
 
 # ============================================================
@@ -461,9 +486,10 @@ def _b64_to_bytes(b64):
 # ============================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("  Sistema de Procura API v3.3")
+    print("  Sistema de Procura API v3.4")
     print(f"  bcrypt:            {'OK' if BCRYPT_OK else 'AUSENTE'}")
     print(f"  Hugging Face:      {'OK' if FACE_OK else 'AUSENTE (HF_TOKEN vazio)'}")
+    print(f"  Modelo:            CLIP ViT-B/32")
     print(f"  Porta:             {PORT}")
     print("=" * 60)
     app.run(host="0.0.0.0", port=PORT, debug=False)
