@@ -1,16 +1,13 @@
 /* ============================================================
-   PESQUISA POR CARACTERÍSTICAS
+   PESQUISA — busca na API (Neon)
    ============================================================ */
 const Pesquisa = {
-    ultimoResultado: null,
-
     init() {
         document.getElementById('btn-procurar')?.addEventListener('click', () => this.procurar());
         document.getElementById('btn-pesq-limpar')?.addEventListener('click', () => this.limpar());
         document.getElementById('btn-pesq-abrir')?.addEventListener('click', () => this._abrirSelecionado());
         document.getElementById('btn-pesq-preencher')?.addEventListener('click', () => this._preencherFormulario());
 
-        // Debounce nos inputs
         const inputs = ['pesq-id', 'pesq-nome', 'pesq-apelido', 'pesq-rg',
             'pesq-nascimento', 'pesq-cor', 'pesq-altura', 'pesq-cidade', 'pesq-obs'];
         inputs.forEach(id => {
@@ -25,7 +22,6 @@ const Pesquisa = {
             }
         });
 
-        // Seleção na tabela
         document.querySelector('#table-pesquisa tbody')?.addEventListener('click', (e) => {
             const tr = e.target.closest('tr');
             if (!tr || !tr.dataset.id) return;
@@ -37,7 +33,7 @@ const Pesquisa = {
         document.querySelector('#table-pesquisa tbody')?.addEventListener('dblclick', () => this._abrirSelecionado());
     },
 
-    procurar(silencioso = false) {
+    async procurar(silencioso = false) {
         const id = document.getElementById('pesq-id').value.trim();
         const nome = document.getElementById('pesq-nome').value.trim();
         const rg = document.getElementById('pesq-rg').value.trim();
@@ -62,29 +58,34 @@ const Pesquisa = {
             return;
         }
 
-        const resultados = MockDB.listarTodos().filter(u => {
-            if (id && parseInt(id) !== u.id) return false;
-            if (nome && !u.nome.toLowerCase().includes(nome.toLowerCase())) return false;
-            if (rg && !(u.rg || '').toLowerCase().includes(rg.toLowerCase())) return false;
-            if (apelido && !(u.apelido || '').toLowerCase().includes(apelido.toLowerCase())) return false;
-            if (nasc && !(u.data_nascimento || '').includes(nasc)) return false;
-            if (cor && !(u.cor || '').toLowerCase().includes(cor.toLowerCase())) return false;
-            if (altura && !(u.altura || '').includes(altura)) return false;
-            if (cidade && !(u.cidade || '').toLowerCase().includes(cidade.toLowerCase())) return false;
-            if (obs && !(u.observacoes || '').toLowerCase().includes(obs.toLowerCase())) return false;
+        try {
+            const registros = await API.listarRegistros();
+            const resultados = registros.filter(u => {
+                if (id && parseInt(id) !== u.id) return false;
+                if (nome && !u.nome.toLowerCase().includes(nome.toLowerCase())) return false;
+                if (rg && !(u.rg || '').toLowerCase().includes(rg.toLowerCase())) return false;
+                if (apelido && !(u.apelido || '').toLowerCase().includes(apelido.toLowerCase())) return false;
+                if (nasc && !(u.data_nascimento || '').includes(nasc)) return false;
+                if (cor && !(u.cor || '').toLowerCase().includes(cor.toLowerCase())) return false;
+                if (altura && !(u.altura || '').includes(altura)) return false;
+                if (cidade && !(u.cidade || '').toLowerCase().includes(cidade.toLowerCase())) return false;
+                if (obs && !(u.observacoes || '').toLowerCase().includes(obs.toLowerCase())) return false;
 
-            if (tatuagens.length > 0) {
-                const todas = (u.tatuagens || []).join(' | ').toLowerCase();
-                if (!tatuagens.every(t => todas.includes(t.toLowerCase()))) return false;
-            }
-            if (sinais.length > 0) {
-                const todos = (u.sinais || []).join(' | ').toLowerCase();
-                if (!sinais.every(s => todos.includes(s.toLowerCase()))) return false;
-            }
-            return true;
-        });
+                if (tatuagens.length > 0) {
+                    const todas = (u.tatuagens || []).join(' | ').toLowerCase();
+                    if (!tatuagens.every(t => todas.includes(t.toLowerCase()))) return false;
+                }
+                if (sinais.length > 0) {
+                    const todos = (u.sinais || []).join(' | ').toLowerCase();
+                    if (!sinais.every(s => todos.includes(s.toLowerCase()))) return false;
+                }
+                return true;
+            });
 
-        this._renderizar(resultados);
+            this._renderizar(resultados);
+        } catch (e) {
+            Toast.error('Erro na busca: ' + e.message);
+        }
     },
 
     _renderizar(resultados) {
@@ -119,32 +120,34 @@ const Pesquisa = {
         el.style.color = cores[tipo] || 'var(--fg-secondary)';
     },
 
-    _mostrarDetalhe(id) {
-        const u = MockDB.buscarPorId(id);
-        if (!u) return;
-        const foto = document.getElementById('pesq-detalhe-foto');
-        const info = document.getElementById('pesq-detalhe-info');
+    async _mostrarDetalhe(id) {
+        try {
+            const u = await API.buscarRegistro(id);
+            const foto = document.getElementById('pesq-detalhe-foto');
+            const info = document.getElementById('pesq-detalhe-info');
 
-        if (u.fotos && u.fotos.length > 0) {
-            foto.innerHTML = `<img src="${u.fotos[0].dataUrl}" alt="${escapeHtml(u.nome)}">`;
-        } else {
-            foto.textContent = 'Sem foto';
+            if (u.fotos && u.fotos.length > 0) {
+                foto.innerHTML = `<img src="${u.fotos[0].dataUrl}" alt="${escapeHtml(u.nome)}">`;
+            } else {
+                foto.textContent = 'Sem foto';
+            }
+
+            const tat = (u.tatuagens || []).map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
+            const sin = (u.sinais || []).map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
+
+            info.innerHTML = `
+                <h3>${escapeHtml(u.nome)}</h3>
+                <p><b>ID:</b> ${u.id} &nbsp; <b>Apelido:</b> ${escapeHtml(u.apelido || '—')}</p>
+                <p><b>RG:</b> ${escapeHtml(u.rg || '—')} &nbsp; <b>Nascimento:</b> ${escapeHtml(u.data_nascimento || '—')}</p>
+                <p><b>Cor:</b> ${escapeHtml(u.cor || '—')} &nbsp; <b>Altura:</b> ${escapeHtml(u.altura || '—')}</p>
+                <p><b>Cidade:</b> ${escapeHtml(u.cidade || '—')}</p>
+                <p><b>🎨 Tatuagens:</b></p><ul>${tat}</ul>
+                <p><b>🔎 Sinais:</b></p><ul>${sin}</ul>
+                <p><b>📋 Observações:</b><br>${escapeHtml(u.observacoes || '—')}</p>
+            `;
+        } catch (e) {
+            console.error(e);
         }
-
-        const tat = (u.tatuagens || []).map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
-        const sin = (u.sinais || []).map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
-
-        info.innerHTML = `
-            <h3>${escapeHtml(u.nome)}</h3>
-            <p><b>ID:</b> ${u.id} &nbsp; <b>Apelido:</b> ${escapeHtml(u.apelido || '—')}</p>
-            <p><b>RG:</b> ${escapeHtml(u.rg || '—')} &nbsp; <b>Nascimento:</b> ${escapeHtml(u.data_nascimento || '—')}</p>
-            <p><b>Cor:</b> ${escapeHtml(u.cor || '—')} &nbsp; <b>Altura:</b> ${escapeHtml(u.altura || '—')}</p>
-            <p><b>Cidade:</b> ${escapeHtml(u.cidade || '—')}</p>
-            <p><b>🎨 Tatuagens:</b></p><ul>${tat}</ul>
-            <p><b>🔎 Sinais:</b></p><ul>${sin}</ul>
-            <p><b>📋 Observações:</b><br>${escapeHtml(u.observacoes || '—')}</p>
-            <p style="color:var(--fg-secondary);font-size:9pt;"><i>Cadastrado em: ${escapeHtml(u.data_cadastro || '—')}</i></p>
-        `;
     },
 
     _limparDetalhe() {
@@ -152,21 +155,20 @@ const Pesquisa = {
         document.getElementById('pesq-detalhe-info').innerHTML = '<p class="placeholder-text">Selecione um registro na tabela para ver os detalhes.</p>';
     },
 
-    _getSelecionado() {
+    async _getSelecionado() {
         const sel = document.querySelector('#table-pesquisa tbody tr.selected');
         if (!sel) return null;
-        return MockDB.buscarPorId(parseInt(sel.dataset.id));
+        return await API.buscarRegistro(parseInt(sel.dataset.id));
     },
 
-    _abrirSelecionado() {
-        const u = this._getSelecionado();
+    async _abrirSelecionado() {
+        const u = await this._getSelecionado();
         if (!u) { Toast.warning('Selecione um registro na tabela.'); return; }
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'CONSULTA', u.id, u.nome);
         Cadastro.abrirDetalhes(u);
     },
 
-    _preencherFormulario() {
-        const u = this._getSelecionado();
+    async _preencherFormulario() {
+        const u = await this._getSelecionado();
         if (!u) { Toast.warning('Selecione um registro na tabela.'); return; }
         Cadastro.preencher(u);
         TabsManager.ativar('cadastros');
