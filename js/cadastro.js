@@ -1,29 +1,15 @@
 /* ============================================================
-   CADASTRO — CRUD via API + Neon (CORRIGIDO)
+   CADASTRO — CRUD via API + Neon
+   Gera embedding facial no navegador via FaceRec
    ============================================================ */
 
-/**
- * Converte valor retornado pela API em array.
- * Aceita:
- *   - array (já é o esperado)
- *   - string "a; b; c" (backend retorna assim)
- *   - null/undefined (retorna [])
- */
 function _paraArray(valor) {
     if (!valor) return [];
-    if (Array.isArray(valor)) {
-        return valor.map(v => String(v).trim()).filter(v => v);
-    }
-    if (typeof valor === 'string') {
-        return valor.split(';').map(s => s.trim()).filter(s => s);
-    }
+    if (Array.isArray(valor)) return valor.map(v => String(v).trim()).filter(v => v);
+    if (typeof valor === 'string') return valor.split(';').map(s => s.trim()).filter(s => s);
     return [];
 }
 
-/**
- * Normaliza um objeto de registro recebido da API.
- * Garante que tatuagens e sinais sejam sempre arrays.
- */
 function _normalizarRegistro(u) {
     if (!u) return u;
     return {
@@ -130,7 +116,6 @@ const Cadastro = {
     setListaDinamica(id, valores) {
         const container = document.getElementById(id);
         if (!container) return;
-        // Garante que é array
         valores = _paraArray(valores);
         container.innerHTML = '';
         if (valores.length === 0) {
@@ -141,7 +126,7 @@ const Cadastro = {
         valores.forEach(v => this.adicionarCampoDinamico(container, '', v));
     },
 
-    /* ============ FOTOS ============ */
+    /* ============ FOTOS — COM EMBEDDING FACIAL ============ */
     async adicionarFotos(files) {
         for (const file of files) {
             if (this.fotos.length >= this.MAX_FOTOS) {
@@ -152,28 +137,31 @@ const Cadastro = {
                 Toast.warning(`"${file.name}" não é uma imagem válida.`);
                 continue;
             }
+
+            Toast.info(`Processando "${file.name}"...`);
+
             try {
-                const dataUrl = await this.fileToDataURL(file);
+                // Processa a foto usando FaceRec (detecta rosto + gera descritor)
+                const info = await FaceRec.processarArquivo(file);
+
                 this.fotos.push({
-                    dataUrl,
+                    dataUrl: info.dataUrl,
                     nome: file.name,
-                    status: 'ok'
+                    descriptor: info.descriptor,    // 128 números ou null
+                    erro: info.erro
                 });
+
+                if (info.erro) {
+                    Toast.warning(`"${file.name}": ${info.erro}`);
+                } else {
+                    Toast.success(`"${file.name}" — rosto detectado ✅`);
+                }
             } catch (e) {
                 console.error(e);
                 Toast.error(`Erro ao processar "${file.name}"`);
             }
         }
         this.renderizarFotos();
-    },
-
-    fileToDataURL(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
     },
 
     renderizarFotos() {
@@ -183,10 +171,14 @@ const Cadastro = {
 
         this.fotos.forEach((foto, index) => {
             const card = document.createElement('div');
-            card.className = 'foto-card status-ok';
+            const temRosto = !!foto.descriptor;
+            card.className = `foto-card ${temRosto ? 'status-ok' : 'status-bad'}`;
+
+            const statusTexto = temRosto ? '✅ Rosto detectado' : '❌ Sem rosto';
+
             card.innerHTML = `
                 <img src="${foto.dataUrl}" alt="Foto ${index + 1}">
-                <div class="foto-status">✅ Foto</div>
+                <div class="foto-status">${statusTexto}</div>
                 <button type="button" class="foto-remove" data-index="${index}">🗑️ Remover</button>
             `;
             card.querySelector('.foto-remove').addEventListener('click', () => {
@@ -237,7 +229,10 @@ const Cadastro = {
             observacoes: document.getElementById('cad-observacoes').value.trim(),
             tatuagens: this.getValoresLista('lista-tatuagens'),
             sinais: this.getValoresLista('lista-sinais'),
-            fotos: this.fotos.map(f => ({ dataUrl: f.dataUrl })),
+            fotos: this.fotos.map(f => ({
+                dataUrl: f.dataUrl,
+                descriptor: f.descriptor      // enviado para o backend
+            })),
             usuario: AppState.usuarioLogado?.username || '?'
         };
     },
@@ -250,6 +245,14 @@ const Cadastro = {
         }
 
         const dados = this.coletar();
+        const semRosto = dados.fotos.filter(f => !f.descriptor).length;
+        if (semRosto > 0) {
+            const ok = await Confirm.abrir('Atenção',
+                `${semRosto} foto(s) não têm rosto detectado.\n` +
+                `Elas não serão usadas na busca facial.\n\n` +
+                `Deseja cadastrar mesmo assim?`);
+            if (!ok) return;
+        }
 
         try {
             Loading.show('Cadastrando...');
@@ -266,7 +269,7 @@ const Cadastro = {
 
     async atualizar() {
         if (!AppState.registroAtualId) {
-            Toast.warning('Nenhum registro carregado. Use "Cadastrados".');
+            Toast.warning('Nenhum registro carregado.');
             return;
         }
         const erros = this.validarCampos();
@@ -337,7 +340,8 @@ const Cadastro = {
             const popular = (termo = '') => {
                 termo = termo.toLowerCase();
                 const filtrados = registros.filter(r =>
-                    !termo || r.nome.toLowerCase().includes(termo) || (r.apelido || '').toLowerCase().includes(termo)
+                    !termo || r.nome.toLowerCase().includes(termo) ||
+                    (r.apelido || '').toLowerCase().includes(termo)
                 );
                 tbody.innerHTML = filtrados.map(u => `
                     <tr data-id="${u.id}">
@@ -422,7 +426,9 @@ const Cadastro = {
 
         this.fotos = (u.fotos || []).map(f => ({
             dataUrl: f.dataUrl || f.imagem,
-            status: 'ok'
+            descriptor: f.descriptor || null,  // backend pode ou não devolver
+            nome: `foto_${f.id}`,
+            erro: null
         })).filter(f => f.dataUrl);
         this.renderizarFotos();
     },
