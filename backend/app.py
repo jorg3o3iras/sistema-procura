@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Sistema de Procura v3.3 - Backend Flask + Neon PostgreSQL
-Reconhecimento facial via Hugging Face Inference API (CLIP)
+Sistema de Procura v3.4 - Backend Flask + Neon PostgreSQL
+Reconhecimento facial via Hugging Face Inference API (CLIP + fallback)
 """
 import os
 import base64
@@ -34,9 +34,13 @@ FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 PORT = int(os.environ.get("PORT", 5000))
 
-# Modelo CLIP da OpenAI — gera embeddings de imagem (512 floats)
-HF_MODEL = "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32"
-FACE_THRESHOLD = 0.25   # CLIP usa distância diferente; calibrável
+# Modelos do Hugging Face (tentados em ordem)
+HF_MODELS = [
+    "https://api-inference.huggingface.co/models/sentence-transformers/clip-ViT-B-32",
+    "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32",
+]
+
+FACE_THRESHOLD = 0.25
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL nao configurada")
@@ -113,55 +117,74 @@ def verificar_senha(senha: str, hash_arm: str) -> bool:
     return False
 
 # ============================================================
-# FACE — Hugging Face CLIP
+# FACE — Hugging Face
 # ============================================================
+def _extrair_embedding_da_resposta(dados):
+    """Tenta extrair embedding de qualquer formato comum do HF."""
+    if dados is None:
+        return None
+
+    # Formato dict
+    if isinstance(dados, dict):
+        embs = dados.get("embeddings") or dados.get("embedding")
+        if embs:
+            if isinstance(embs, list) and embs and isinstance(embs[0], list):
+                return np.array(embs[0], dtype=np.float32)
+            if isinstance(embs, list) and embs and isinstance(embs[0], (int, float)):
+                return np.array(embs, dtype=np.float32)
+
+    # Formato lista
+    if isinstance(dados, list):
+        if len(dados) == 0:
+            return None
+        if isinstance(dados[0], list):
+            # Pode ser [[emb], [emb]] ou [[emb]]
+            inner = dados[0]
+            if isinstance(inner, list) and inner and isinstance(inner[0], (int, float)):
+                return np.array(inner, dtype=np.float32)
+            return np.array(inner, dtype=np.float32)
+        if isinstance(dados[0], (int, float)):
+            return np.array(dados, dtype=np.float32)
+
+    return None
+
+
 def gerar_embedding(img_bytes: bytes):
-    """
-    Gera embedding de imagem via Hugging Face CLIP.
-    Retorna vetor numpy float32 (512 dimensões) ou None.
-    """
+    """Tenta gerar embedding em cada modelo, na ordem de HF_MODELS."""
     if not HF_TOKEN:
         return None
-    try:
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}",
-            "Content-Type": "application/octet-stream"
-        }
-        res = requests.post(HF_MODEL, headers=headers, data=img_bytes, timeout=60)
 
-        if res.status_code != 200:
-            print(f"[HF] status {res.status_code}: {res.text[:300]}")
-            return None
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/octet-stream",
+    }
 
-        dados = res.json()
+    for modelo in HF_MODELS:
+        try:
+            res = requests.post(modelo, headers=headers, data=img_bytes, timeout=60)
+            if res.status_code != 200:
+                print(f"[HF] {modelo} -> status {res.status_code}: {res.text[:200]}")
+                continue
 
-        # Formato 1: {"embedding": [512 floats]}
-        if isinstance(dados, dict):
-            emb = dados.get("embedding") or dados.get("embeddings")
-            if emb:
-                if isinstance(emb[0], list):
-                    return np.array(emb[0], dtype=np.float32)
-                return np.array(emb, dtype=np.float32)
-            return None
+            dados = res.json()
+            emb = _extrair_embedding_da_resposta(dados)
+            if emb is not None:
+                print(f"[HF] OK via {modelo} (dim={len(emb)})")
+                return emb
+            else:
+                print(f"[HF] {modelo} retornou formato inesperado: {str(dados)[:200]}")
+        except Exception as e:
+            print(f"[HF] {modelo} erro: {e}")
+            continue
 
-        # Formato 2: [512 floats]
-        if isinstance(dados, list):
-            if len(dados) == 0:
-                return None
-            if isinstance(dados[0], list):
-                return np.array(dados[0], dtype=np.float32)
-            if isinstance(dados[0], (int, float)):
-                return np.array(dados, dtype=np.float32)
+    return None
 
-        return None
-    except Exception as e:
-        print(f"[HF] erro: {e}")
-        return None
 
 def embedding_para_blob(emb):
     if emb is None:
         return None
     return emb.astype(np.float32).tobytes()
+
 
 def blob_para_embedding(blob):
     if blob is None:
@@ -170,8 +193,8 @@ def blob_para_embedding(blob):
         blob = bytes(blob)
     return np.frombuffer(blob, dtype=np.float32)
 
+
 def normalizar_embedding(emb):
-    """Normaliza para comparação por cosseno."""
     if emb is None:
         return None
     norm = np.linalg.norm(emb)
@@ -201,7 +224,7 @@ def home():
         "app": "Sistema de Procura API",
         "version": "3.4",
         "face_recognition": FACE_OK,
-        "modelo": "CLIP ViT-B/32",
+        "modelos": HF_MODELS,
         "bcrypt": BCRYPT_OK,
         "status": "online"
     })
@@ -217,6 +240,54 @@ def health():
         })
     except Exception as e:
         return jsonify({"db": "error", "detalhes": str(e)}), 500
+
+# ============================================================
+# ROTAS — DEBUG HF
+# ============================================================
+@app.route("/api/debug-hf", methods=["GET"])
+def debug_hf():
+    """Diagnóstico: testa se o HF está acessível e o que ele responde."""
+    resultado = {
+        "hf_token_presente": bool(HF_TOKEN),
+        "hf_token_tamanho": len(HF_TOKEN) if HF_TOKEN else 0,
+        "hf_token_prefixo": (HF_TOKEN[:6] + "...") if HF_TOKEN else "",
+        "modelos": HF_MODELS,
+    }
+
+    # Teste 1: quem sou eu
+    try:
+        r = requests.get(
+            "https://huggingface.co/api/whoami-v2",
+            headers={"Authorization": f"Bearer {HF_TOKEN}"},
+            timeout=10,
+        )
+        resultado["whoami_status"] = r.status_code
+        resultado["whoami_resposta"] = r.text[:300]
+    except Exception as e:
+        resultado["whoami_erro"] = str(e)
+
+    # Teste 2: chamar cada modelo com imagem 1x1 PNG
+    img_min = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/octet-stream",
+    }
+    for i, modelo in enumerate(HF_MODELS):
+        chave = f"modelo_{i+1}"
+        try:
+            r = requests.post(modelo, headers=headers, data=img_min, timeout=30)
+            resultado[chave] = {
+                "url": modelo,
+                "status": r.status_code,
+                "resposta": r.text[:500],
+            }
+        except Exception as e:
+            resultado[chave] = {"url": modelo, "erro": str(e)}
+
+    return jsonify(resultado)
 
 # ============================================================
 # ROTAS — LOGIN
@@ -381,7 +452,7 @@ def excluir_registro(rid):
     return jsonify({"ok": True})
 
 # ============================================================
-# ROTAS — BUSCA POR IMAGEM (CLIP)
+# ROTAS — BUSCA POR IMAGEM
 # ============================================================
 @app.route("/api/busca-facial", methods=["POST"])
 def busca_facial():
@@ -405,7 +476,7 @@ def busca_facial():
 
     if enc_entrada is None:
         return jsonify({
-            "erro": "Nao foi possivel gerar embedding da imagem. Verifique se o HF esta online.",
+            "erro": "Nao foi possivel gerar embedding. Veja /api/debug-hf para diagnostico.",
             "matches": [],
             "disponivel": True
         }), 400
@@ -426,9 +497,7 @@ def busca_facial():
             if emb_db is None or len(emb_db) != len(enc_entrada):
                 continue
             emb_db_norm = normalizar_embedding(emb_db)
-            # Similaridade de cosseno (1 - cos_dist)
             cos_sim = float(np.dot(enc_entrada_norm, emb_db_norm))
-            # Converte para distância (quanto menor, mais parecido)
             dist = 1.0 - cos_sim
             if dist <= FACE_THRESHOLD:
                 matches.append({
@@ -489,7 +558,7 @@ if __name__ == "__main__":
     print("  Sistema de Procura API v3.4")
     print(f"  bcrypt:            {'OK' if BCRYPT_OK else 'AUSENTE'}")
     print(f"  Hugging Face:      {'OK' if FACE_OK else 'AUSENTE (HF_TOKEN vazio)'}")
-    print(f"  Modelo:            CLIP ViT-B/32")
+    print(f"  Modelos:           {HF_MODELS}")
     print(f"  Porta:             {PORT}")
     print("=" * 60)
     app.run(host="0.0.0.0", port=PORT, debug=False)
