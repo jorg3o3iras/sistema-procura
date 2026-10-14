@@ -1,11 +1,10 @@
 /* ============================================================
-   BUSCA POR IMAGEM (Frontend)
+   BUSCA POR IMAGEM — envia foto para a API
    ============================================================ */
 const BuscaImagem = {
     imagemEntrada: null,
     ultimoMatchId: null,
     webcamStream: null,
-    ultimoFrame: null,
 
     init() {
         document.getElementById('btn-inserir-foto')?.addEventListener('click', () => {
@@ -87,64 +86,60 @@ const BuscaImagem = {
             return;
         }
 
-        const registros = MockDB.listarTodos().filter(u =>
-            u.fotos && u.fotos.some(f => f.embedding)
-        );
+        try {
+            Loading.show('Enviando imagem para análise...');
+            const res = await API.buscaFacial(this.imagemEntrada);
+            Loading.hide();
 
-        if (registros.length === 0) {
-            Toast.info('Nenhum registro possui foto com rosto detectado.');
-            return;
-        }
+            // Se o backend retornar erro (ex: recurso indisponível)
+            if (res && res.erro) {
+                this._renderizarMatches([]);
+                document.getElementById('img-detalhe-foto').textContent = 'Indisponível';
+                document.getElementById('img-detalhe-info').innerHTML =
+                    `<p class="placeholder-text">${escapeHtml(res.erro)}</p>`;
+                document.getElementById('btn-img-abrir').disabled = true;
+                document.getElementById('btn-img-preencher').disabled = true;
+                Toast.warning(res.erro);
+                return;
+            }
 
-        Loading.show('Comparando imagens...');
+            const matches = res.matches || [];
 
-        // Simulação de busca facial (o backend fará o real)
-        // Como o frontend não tem face_recognition, mostramos uma busca
-        // por similaridade simples do hash do embedding.
-        await new Promise(r => setTimeout(r, 1200));
+            if (matches.length === 0) {
+                this._renderizarMatches([]);
+                document.getElementById('img-detalhe-foto').textContent = 'Sem correspondência';
+                document.getElementById('img-detalhe-info').innerHTML =
+                    '<p class="placeholder-text">Nenhuma correspondência encontrada.</p>';
+                document.getElementById('btn-img-abrir').disabled = true;
+                document.getElementById('btn-img-preencher').disabled = true;
+                Toast.info('Nenhuma correspondência encontrada.');
+                return;
+            }
 
-        const matches = [];
-        for (const u of registros) {
-            for (const f of u.fotos) {
-                if (!f.embedding) continue;
-                // Similaridade simulada
-                const sim = 0.5 + Math.random() * 0.45; // 50-95%
-                if (sim > 0.55) {
-                    matches.push({ dist: 1 - sim, sim, uid: u.id });
-                    break;
-                }
+            this._renderizarMatches(matches);
+
+            // Mostra detalhes do melhor match
+            const melhor = matches[0];
+            await this._mostrarDetalhe(melhor.registro_id, melhor.similaridade);
+
+            const pct = (melhor.similaridade * 100).toFixed(1);
+            let nivel;
+            if (melhor.similaridade >= 0.80) nivel = '🎯 ALTA PRECISÃO';
+            else if (melhor.similaridade >= 0.55) nivel = '⚖️ PRECISÃO MÉDIA';
+            else nivel = '⚠️ BAIXA PRECISÃO';
+
+            Toast.info(`${nivel} — ${pct}% de similaridade com o registro #${melhor.registro_id}.`);
+        } catch (e) {
+            Loading.hide();
+            console.error('Erro na busca facial:', e);
+
+            // Se o backend não suporta (plano free), avisa
+            if (e.message.includes('nao disponivel') || e.message.includes('não disponível') || e.message.includes('503')) {
+                Toast.warning('Busca facial indisponível no plano atual do servidor.');
+            } else {
+                Toast.error('Erro: ' + e.message);
             }
         }
-
-        matches.sort((a, b) => a.dist - b.dist);
-        const top3 = matches.slice(0, 3);
-
-        Loading.hide();
-
-        if (top3.length === 0) {
-            Toast.warning('Nenhuma correspondência encontrada.');
-            this._renderizarMatches([]);
-            document.getElementById('img-detalhe-foto').textContent = 'Sem correspondência';
-            document.getElementById('img-detalhe-info').innerHTML = '<p class="placeholder-text">Nenhum match.</p>';
-            document.getElementById('btn-img-abrir').disabled = true;
-            document.getElementById('btn-img-preencher').disabled = true;
-            return;
-        }
-
-        this._renderizarMatches(top3);
-        const melhor = top3[0];
-        this._mostrarDetalhe(melhor.uid, melhor.sim);
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'BUSCA_FACIAL',
-            melhor.uid, `${top3.length} match(es)`);
-
-        // Mensagem com nível de confiança
-        const pct = melhor.sim * 100;
-        let nivel;
-        if (pct >= 80) nivel = '🎯 ALTA PRECISÃO';
-        else if (pct >= 55) nivel = '⚖️ PRECISÃO MÉDIA';
-        else nivel = '⚠️ BAIXA PRECISÃO';
-
-        Toast.info(`${nivel} — ${pct.toFixed(1)}% de similaridade com o registro #${melhor.uid}.`);
     },
 
     _renderizarMatches(matches) {
@@ -154,16 +149,20 @@ const BuscaImagem = {
         for (let i = 0; i < 3; i++) {
             const card = document.createElement('div');
             card.className = 'match-card';
+
             if (matches[i]) {
-                const u = MockDB.buscarPorId(matches[i].uid);
-                const foto = u.fotos && u.fotos.length > 0 ? u.fotos[0].dataUrl : '';
-                const pct = matches[i].sim * 100;
-                const conf = pct >= 80 ? 'conf-alta' : pct >= 55 ? 'conf-media' : 'conf-baixa';
+                const m = matches[i];
+                const pct = (m.similaridade * 100).toFixed(1);
+                const conf = m.similaridade >= 0.80 ? 'conf-alta'
+                          : m.similaridade >= 0.55 ? 'conf-media'
+                          : 'conf-baixa';
                 card.classList.add(conf);
                 card.innerHTML = `
-                    ${foto ? `<img src="${foto}" alt="${escapeHtml(u.nome)}">` : '<div style="aspect-ratio:1;background:var(--bg-dark);border-radius:6px;"></div>'}
-                    <div class="match-name">${escapeHtml(u.nome)} (ID ${u.id})</div>
-                    <div style="font-size:9pt;">Confiança: ${pct.toFixed(1)}%</div>
+                    <div style="aspect-ratio:1;background:var(--bg-dark);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--fg-secondary);">
+                        #${m.registro_id}
+                    </div>
+                    <div class="match-name">${escapeHtml(m.nome)}</div>
+                    <div style="font-size:9pt;">Confiança: ${pct}%</div>
                 `;
             } else {
                 card.innerHTML = `
@@ -175,52 +174,72 @@ const BuscaImagem = {
         }
     },
 
-    _mostrarDetalhe(id, sim) {
-        const u = MockDB.buscarPorId(id);
-        if (!u) return;
-        this.ultimoMatchId = id;
+    async _mostrarDetalhe(id, sim) {
+        try {
+            const raw = await API.buscarRegistro(id);
+            // Converte sinais/tatuagens em array
+            const paraArray = (v) => {
+                if (!v) return [];
+                if (Array.isArray(v)) return v;
+                if (typeof v === 'string') return v.split(';').map(s => s.trim()).filter(s => s);
+                return [];
+            };
 
-        const foto = document.getElementById('img-detalhe-foto');
-        if (u.fotos && u.fotos.length > 0) {
-            foto.innerHTML = `<img src="${u.fotos[0].dataUrl}" alt="${escapeHtml(u.nome)}">`;
-        } else {
-            foto.textContent = 'Sem foto';
+            this.ultimoMatchId = id;
+
+            const foto = document.getElementById('img-detalhe-foto');
+            const fotos = raw.fotos || [];
+            if (fotos.length > 0) {
+                foto.innerHTML = `<img src="${fotos[0].dataUrl}" alt="${escapeHtml(raw.nome)}">`;
+            } else {
+                foto.textContent = 'Sem foto';
+            }
+
+            const tatArr = paraArray(raw.tatuagens || raw.tatuagem);
+            const sinArr = paraArray(raw.sinais);
+            const tat = tatArr.map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
+            const sin = sinArr.map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
+            const pct = sim * 100;
+            const cor = pct >= 80 ? 'var(--success)' : pct >= 55 ? 'var(--warning)' : 'var(--info)';
+
+            document.getElementById('img-detalhe-info').innerHTML = `
+                <h3 style="color:var(--accent);">${escapeHtml(raw.nome)}</h3>
+                <p style="color:${cor};font-weight:bold;">Confiança: ${pct.toFixed(1)}%</p>
+                <p><b>ID:</b> ${raw.id} &nbsp; <b>Apelido:</b> ${escapeHtml(raw.apelido || '—')}</p>
+                <p><b>RG:</b> ${escapeHtml(raw.rg || '—')} &nbsp; <b>Nascimento:</b> ${escapeHtml(raw.data_nascimento || '—')}</p>
+                <p><b>Cor:</b> ${escapeHtml(raw.cor || '—')} &nbsp; <b>Altura:</b> ${escapeHtml(raw.altura || '—')}</p>
+                <p><b>Cidade:</b> ${escapeHtml(raw.cidade || '—')}</p>
+                <p><b>🎨 Tatuagens:</b></p><ul>${tat}</ul>
+                <p><b>🔎 Sinais:</b></p><ul>${sin}</ul>
+            `;
+            document.getElementById('btn-img-abrir').disabled = false;
+            document.getElementById('btn-img-preencher').disabled = false;
+        } catch (e) {
+            console.error(e);
+            Toast.error('Erro ao carregar detalhes: ' + e.message);
         }
-
-        const tat = (u.tatuagens || []).map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
-        const sin = (u.sinais || []).map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
-        const pct = sim * 100;
-        const cor = pct >= 80 ? 'var(--success)' : pct >= 55 ? 'var(--warning)' : 'var(--info)';
-
-        document.getElementById('img-detalhe-info').innerHTML = `
-            <h3 style="color:var(--accent);">${escapeHtml(u.nome)}</h3>
-            <p style="color:${cor};font-weight:bold;">Confiança: ${pct.toFixed(1)}%</p>
-            <p><b>ID:</b> ${u.id} &nbsp; <b>Apelido:</b> ${escapeHtml(u.apelido || '—')}</p>
-            <p><b>RG:</b> ${escapeHtml(u.rg || '—')} &nbsp; <b>Nascimento:</b> ${escapeHtml(u.data_nascimento || '—')}</p>
-            <p><b>Cor:</b> ${escapeHtml(u.cor || '—')} &nbsp; <b>Altura:</b> ${escapeHtml(u.altura || '—')}</p>
-            <p><b>Cidade:</b> ${escapeHtml(u.cidade || '—')}</p>
-            <p><b>🎨 Tatuagens:</b></p><ul>${tat}</ul>
-            <p><b>🔎 Sinais:</b></p><ul>${sin}</ul>
-        `;
-        document.getElementById('btn-img-abrir').disabled = false;
-        document.getElementById('btn-img-preencher').disabled = false;
     },
 
-    _abrirRegistro() {
+    async _abrirRegistro() {
         if (!this.ultimoMatchId) return;
-        const u = MockDB.buscarPorId(this.ultimoMatchId);
-        if (!u) return;
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'CONSULTA', u.id, u.nome);
-        Cadastro.abrirDetalhes(u);
+        try {
+            const u = await API.buscarRegistro(this.ultimoMatchId);
+            Cadastro.abrirDetalhes(u);
+        } catch (e) {
+            Toast.error(e.message);
+        }
     },
 
-    _preencherFormulario() {
+    async _preencherFormulario() {
         if (!this.ultimoMatchId) return;
-        const u = MockDB.buscarPorId(this.ultimoMatchId);
-        if (!u) return;
-        Cadastro.preencher(u);
-        TabsManager.ativar('cadastros');
-        Toast.success(`Dados de "${u.nome}" carregados no formulário.`);
+        try {
+            const u = await API.buscarRegistro(this.ultimoMatchId);
+            Cadastro.preencher(u);
+            TabsManager.ativar('cadastros');
+            Toast.success(`Dados de "${u.nome}" carregados no formulário.`);
+        } catch (e) {
+            Toast.error(e.message);
+        }
     },
 
     limpar() {
@@ -231,7 +250,8 @@ const BuscaImagem = {
         preview.innerHTML = '<span class="placeholder-text">Nenhuma imagem</span>';
         this._renderizarMatches([]);
         document.getElementById('img-detalhe-foto').textContent = 'Sem dados';
-        document.getElementById('img-detalhe-info').innerHTML = '<p class="placeholder-text">Os dados do registro mais provável aparecerão aqui após a busca.</p>';
+        document.getElementById('img-detalhe-info').innerHTML =
+            '<p class="placeholder-text">Os dados do registro mais provável aparecerão aqui após a busca.</p>';
         document.getElementById('btn-img-abrir').disabled = true;
         document.getElementById('btn-img-preencher').disabled = true;
     }
