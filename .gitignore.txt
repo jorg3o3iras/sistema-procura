@@ -1,0 +1,29 @@
+# Variaveis de ambiente (nunca subir!)
+.env
+.env.local
+.env.*.local
+
+# Python
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.env
+
+# Sistema
+.DS_Store
+Thumbs.db
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp
