@@ -1,0 +1,48 @@
+/* ============================================================
+   TEMA ESCURO (Padrão)
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+    --bg-dark: #1e1e2e;
+    --bg-medium: #282a3a;
+    --bg-light: #313244;
+    --bg-card: #252537;
+    --fg-primary: #cdd6f4;
+    --fg-secondary: #a6adc8;
+    --accent: #89b4fa;
+    --accent-hover: #74a8f7;
+    --success: #a6e3a1;
+    --warning: #f9e2af;
+    --danger: #f38ba8;
+    --info: #89dceb;
+    --border: #45475a;
+    --input-bg: #313244;
+    --input-fg: #cdd6f4;
+    --label-fg: #cdd6f4;
+    --shadow: rgba(0, 0, 0, 0.4);
+    --overlay: rgba(0, 0, 0, 0.7);
+}
+
+/* ============================================================
+   TEMA CLARO
+   ============================================================ */
+[data-theme="light"] {
+    --bg-dark: #f0f2f5;
+    --bg-medium: #ffffff;
+    --bg-light: #ffffff;
+    --bg-card: #ffffff;
+    --fg-primary: #1a1a2e;
+    --fg-secondary: #5a5a6e;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --info: #0891b2;
+    --border: #d1d5db;
+    --input-bg: #ffffff;
+    --input-fg: #1a1a2e;
+    --label-fg: #1a1a2e;
+    --shadow: rgba(0, 0, 0, 0.1);
+    --overlay: rgba(0, 0, 0, 0.5);
+}
