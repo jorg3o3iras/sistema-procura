@@ -1,8 +1,11 @@
 /* ============================================================
-   BUSCA POR IMAGEM — envia foto para a API
+   BUSCA POR IMAGEM — 100% no navegador com face-api.js
+   Nenhuma imagem é enviada ao servidor.
    ============================================================ */
+
 const BuscaImagem = {
     imagemEntrada: null,
+    descriptorEntrada: null,        // 128 números gerados pelo FaceRec
     ultimoMatchId: null,
     webcamStream: null,
 
@@ -14,13 +17,7 @@ const BuscaImagem = {
             input.onchange = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                    this.imagemEntrada = reader.result;
-                    this._mostrarPreview(reader.result);
-                    document.getElementById('btn-capturar-webcam').disabled = true;
-                };
-                reader.readAsDataURL(file);
+                this._processarArquivo(file);
             };
             input.click();
         });
@@ -33,6 +30,26 @@ const BuscaImagem = {
         document.getElementById('btn-img-preencher')?.addEventListener('click', () => this._preencherFormulario());
 
         this._renderizarMatches([]);
+    },
+
+    async _processarArquivo(file) {
+        Toast.info('Processando imagem...');
+        try {
+            const info = await FaceRec.processarArquivo(file);
+            if (info.erro) {
+                this.imagemEntrada = null;
+                this.descriptorEntrada = null;
+                Toast.error(info.erro);
+                return;
+            }
+            this.imagemEntrada = info.dataUrl;
+            this.descriptorEntrada = info.descriptor;
+            this._mostrarPreview(info.dataUrl);
+            Toast.success('Rosto detectado na imagem ✅');
+        } catch (e) {
+            console.error(e);
+            Toast.error('Erro ao processar imagem.');
+        }
     },
 
     async abrirWebcam() {
@@ -50,7 +67,7 @@ const BuscaImagem = {
         }
     },
 
-    capturarWebcam() {
+    async capturarWebcam() {
         const video = document.getElementById('webcam-video');
         const canvas = document.getElementById('webcam-canvas');
         if (!video.videoWidth) return;
@@ -58,10 +75,27 @@ const BuscaImagem = {
         canvas.height = video.videoHeight;
         canvas.getContext('2d').drawImage(video, 0, 0);
         const dataUrl = canvas.toDataURL('image/png');
+
         this.imagemEntrada = dataUrl;
         this._mostrarPreview(dataUrl);
         this._fecharWebcam();
-        Toast.success('Foto capturada!');
+
+        // Processa descritor a partir da captura
+        Toast.info('Detectando rosto...');
+        try {
+            const img = await FaceRec.carregarImagem(dataUrl);
+            const resultado = await FaceRec.detectarRosto(img);
+            if (resultado) {
+                this.descriptorEntrada = resultado.descriptor;
+                Toast.success('Rosto capturado ✅');
+            } else {
+                this.descriptorEntrada = null;
+                Toast.warning('Nenhum rosto detectado na captura.');
+            }
+        } catch (e) {
+            this.descriptorEntrada = null;
+            Toast.error('Erro ao processar captura.');
+        }
     },
 
     _fecharWebcam() {
@@ -85,60 +119,47 @@ const BuscaImagem = {
             Toast.warning('Carregue uma imagem primeiro.');
             return;
         }
+        if (!this.descriptorEntrada) {
+            Toast.warning('Nenhum rosto detectado nesta imagem. Use uma foto frontal com boa iluminação.');
+            return;
+        }
 
         try {
-            Loading.show('Enviando imagem para análise...');
-            const res = await API.buscaFacial(this.imagemEntrada);
+            Loading.show('Comparando rostos...');
+            const res = await API.buscaFacial(this.descriptorEntrada);
             Loading.hide();
 
-            // Se o backend retornar erro (ex: recurso indisponível)
-            if (res && res.erro) {
-                this._renderizarMatches([]);
-                document.getElementById('img-detalhe-foto').textContent = 'Indisponível';
-                document.getElementById('img-detalhe-info').innerHTML =
-                    `<p class="placeholder-text">${escapeHtml(res.erro)}</p>`;
-                document.getElementById('btn-img-abrir').disabled = true;
-                document.getElementById('btn-img-preencher').disabled = true;
-                Toast.warning(res.erro);
+            if (res.erro) {
+                Toast.error(res.erro);
                 return;
             }
 
             const matches = res.matches || [];
-
             if (matches.length === 0) {
                 this._renderizarMatches([]);
                 document.getElementById('img-detalhe-foto').textContent = 'Sem correspondência';
                 document.getElementById('img-detalhe-info').innerHTML =
-                    '<p class="placeholder-text">Nenhuma correspondência encontrada.</p>';
+                    '<p class="placeholder-text">Nenhum rosto parecido encontrado.</p>';
                 document.getElementById('btn-img-abrir').disabled = true;
                 document.getElementById('btn-img-preencher').disabled = true;
-                Toast.info('Nenhuma correspondência encontrada.');
+                Toast.info('Nenhuma correspondência.');
                 return;
             }
 
             this._renderizarMatches(matches);
-
-            // Mostra detalhes do melhor match
             const melhor = matches[0];
             await this._mostrarDetalhe(melhor.registro_id, melhor.similaridade);
 
             const pct = (melhor.similaridade * 100).toFixed(1);
-            let nivel;
-            if (melhor.similaridade >= 0.80) nivel = '🎯 ALTA PRECISÃO';
-            else if (melhor.similaridade >= 0.55) nivel = '⚖️ PRECISÃO MÉDIA';
-            else nivel = '⚠️ BAIXA PRECISÃO';
+            const nivel = melhor.similaridade >= 0.8 ? '🎯 ALTA PRECISÃO'
+                        : melhor.similaridade >= 0.55 ? '⚖️ PRECISÃO MÉDIA'
+                        : '⚠️ BAIXA PRECISÃO';
+            Toast.info(`${nivel} — ${pct}% (ID ${melhor.registro_id})`);
 
-            Toast.info(`${nivel} — ${pct}% de similaridade com o registro #${melhor.registro_id}.`);
         } catch (e) {
             Loading.hide();
-            console.error('Erro na busca facial:', e);
-
-            // Se o backend não suporta (plano free), avisa
-            if (e.message.includes('nao disponivel') || e.message.includes('não disponível') || e.message.includes('503')) {
-                Toast.warning('Busca facial indisponível no plano atual do servidor.');
-            } else {
-                Toast.error('Erro: ' + e.message);
-            }
+            console.error(e);
+            Toast.error('Erro na busca: ' + e.message);
         }
     },
 
@@ -177,14 +198,7 @@ const BuscaImagem = {
     async _mostrarDetalhe(id, sim) {
         try {
             const raw = await API.buscarRegistro(id);
-            // Converte sinais/tatuagens em array
-            const paraArray = (v) => {
-                if (!v) return [];
-                if (Array.isArray(v)) return v;
-                if (typeof v === 'string') return v.split(';').map(s => s.trim()).filter(s => s);
-                return [];
-            };
-
+            const u = Cadastro._normalizarRegistro ? Cadastro._normalizarRegistro(raw) : raw;
             this.ultimoMatchId = id;
 
             const foto = document.getElementById('img-detalhe-foto');
@@ -195,10 +209,8 @@ const BuscaImagem = {
                 foto.textContent = 'Sem foto';
             }
 
-            const tatArr = paraArray(raw.tatuagens || raw.tatuagem);
-            const sinArr = paraArray(raw.sinais);
-            const tat = tatArr.map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
-            const sin = sinArr.map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
+            const tat = (u.tatuagens || []).map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
+            const sin = (u.sinais || []).map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
             const pct = sim * 100;
             const cor = pct >= 80 ? 'var(--success)' : pct >= 55 ? 'var(--warning)' : 'var(--info)';
 
@@ -244,6 +256,7 @@ const BuscaImagem = {
 
     limpar() {
         this.imagemEntrada = null;
+        this.descriptorEntrada = null;
         this.ultimoMatchId = null;
         this._fecharWebcam();
         const preview = document.getElementById('preview-imagem');
