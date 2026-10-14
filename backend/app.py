@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Procura v3.3 - Backend Flask + Neon PostgreSQL
+Reconhecimento facial OPCIONAL (ativa automaticamente se instalado)
 """
 import os
 import base64
@@ -15,11 +16,35 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2 import pool
 
+# ============================================================
+# IMPORTAÇÕES OPCIONAIS (reconhecimento facial)
+# ============================================================
 try:
     import bcrypt
     BCRYPT_OK = True
 except ImportError:
     BCRYPT_OK = False
+
+try:
+    import numpy as np
+    NUMPY_OK = True
+except ImportError:
+    NUMPY_OK = False
+
+try:
+    import cv2
+    CV2_OK = True
+except ImportError:
+    CV2_OK = False
+
+try:
+    import face_recognition
+    FACE_OK = True
+except ImportError:
+    FACE_OK = False
+
+FACE_DISPONIVEL = FACE_OK and CV2_OK and NUMPY_OK
+FACE_THRESHOLD = 0.6
 
 # ============================================================
 # CONFIG
@@ -103,6 +128,41 @@ def verificar_senha(senha: str, hash_arm: str) -> bool:
     return False
 
 # ============================================================
+# FACE — helpers
+# ============================================================
+def gerar_embedding(img_bytes: bytes):
+    """Gera embedding 128D a partir de bytes de imagem. Retorna None se indisponível."""
+    if not FACE_DISPONIVEL:
+        return None
+    try:
+        arr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return None
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        locs = face_recognition.face_locations(rgb, model="hog")
+        if not locs:
+            return None
+        locs = sorted(locs, key=lambda r: (r[2] - r[0]) * (r[1] - r[3]), reverse=True)
+        enc = face_recognition.face_encodings(rgb, known_face_locations=[locs[0]])
+        return enc[0] if enc else None
+    except Exception as e:
+        print(f"[FACE] {e}")
+        return None
+
+def embedding_para_blob(emb):
+    if emb is None:
+        return None
+    return emb.astype(np.float32).tobytes()
+
+def blob_para_embedding(blob):
+    if blob is None:
+        return None
+    if isinstance(blob, memoryview):
+        blob = bytes(blob)
+    return np.frombuffer(blob, dtype=np.float32)
+
+# ============================================================
 # AUDITORIA
 # ============================================================
 def registrar_auditoria(usuario, acao, alvo_id=None, detalhes=""):
@@ -116,14 +176,14 @@ def registrar_auditoria(usuario, acao, alvo_id=None, detalhes=""):
         print(f"[AUDITORIA] {e}")
 
 # ============================================================
-# ROTAS
+# ROTAS — STATUS
 # ============================================================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
         "app": "Sistema de Procura API",
         "version": "3.3",
-        "face_recognition": False,
+        "face_recognition": FACE_DISPONIVEL,
         "bcrypt": BCRYPT_OK,
         "status": "online"
     })
@@ -132,10 +192,17 @@ def home():
 def health():
     try:
         query_one("SELECT 1 as ok")
-        return jsonify({"db": "ok", "status": "healthy"})
+        return jsonify({
+            "db": "ok",
+            "status": "healthy",
+            "face_recognition": FACE_DISPONIVEL
+        })
     except Exception as e:
         return jsonify({"db": "error", "detalhes": str(e)}), 500
 
+# ============================================================
+# ROTAS — LOGIN
+# ============================================================
 @app.route("/api/login", methods=["POST"])
 def login():
     data = request.get_json() or {}
@@ -156,6 +223,9 @@ def login():
         "role": row.get("role", "user")
     })
 
+# ============================================================
+# ROTAS — ESTATISTICAS
+# ============================================================
 @app.route("/api/estatisticas", methods=["GET"])
 def estatisticas():
     try:
@@ -173,6 +243,9 @@ def estatisticas():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
+# ============================================================
+# ROTAS — REGISTROS (CRUD)
+# ============================================================
 @app.route("/api/registros", methods=["GET"])
 def listar_registros():
     rows = query_all("SELECT * FROM registros ORDER BY nome ASC")
@@ -222,13 +295,19 @@ def criar_registro():
     ), returning=True)
     rid = row["id"]
 
+    # Processa fotos
     for i, foto in enumerate(data.get("fotos") or []):
         try:
             img_bytes = _b64_to_bytes(foto["dataUrl"])
+            emb_blob = None
+            if FACE_DISPONIVEL:
+                emb = gerar_embedding(img_bytes)
+                emb_blob = embedding_para_blob(emb)
             execute(
-                "INSERT INTO fotos (registro_id, imagem, ordem, data_cadastro) "
-                "VALUES (%s, %s, %s, NOW())",
-                (rid, psycopg2.Binary(img_bytes), i)
+                "INSERT INTO fotos (registro_id, imagem, embedding, ordem, data_cadastro) "
+                "VALUES (%s, %s, %s, %s, NOW())",
+                (rid, psycopg2.Binary(img_bytes),
+                 psycopg2.Binary(emb_blob) if emb_blob else None, i)
             )
         except Exception as e:
             print(f"[FOTO] {e}")
@@ -262,10 +341,15 @@ def atualizar_registro(rid):
         for i, foto in enumerate(data["fotos"]):
             try:
                 img_bytes = _b64_to_bytes(foto["dataUrl"])
+                emb_blob = None
+                if FACE_DISPONIVEL:
+                    emb = gerar_embedding(img_bytes)
+                    emb_blob = embedding_para_blob(emb)
                 execute(
-                    "INSERT INTO fotos (registro_id, imagem, ordem, data_cadastro) "
-                    "VALUES (%s, %s, %s, NOW())",
-                    (rid, psycopg2.Binary(img_bytes), i)
+                    "INSERT INTO fotos (registro_id, imagem, embedding, ordem, data_cadastro) "
+                    "VALUES (%s, %s, %s, %s, NOW())",
+                    (rid, psycopg2.Binary(img_bytes),
+                     psycopg2.Binary(emb_blob) if emb_blob else None, i)
                 )
             except Exception as e:
                 print(f"[FOTO] {e}")
@@ -279,10 +363,75 @@ def excluir_registro(rid):
     registrar_auditoria("?", "EXCLUSAO", rid)
     return jsonify({"ok": True})
 
+# ============================================================
+# ROTAS — BUSCA FACIAL
+# ============================================================
 @app.route("/api/busca-facial", methods=["POST"])
 def busca_facial():
-    return jsonify({"erro": "Busca facial nao disponivel neste plano", "matches": []}), 503
+    if not FACE_DISPONIVEL:
+        return jsonify({
+            "erro": "Busca facial nao disponivel neste plano do servidor",
+            "matches": [],
+            "disponivel": False
+        }), 503
 
+    data = request.get_json() or {}
+    img_b64 = data.get("imagem")
+    if not img_b64:
+        return jsonify({"erro": "Imagem nao fornecida", "matches": []}), 400
+
+    try:
+        img_bytes = _b64_to_bytes(img_b64)
+        enc_entrada = gerar_embedding(img_bytes)
+    except Exception as e:
+        return jsonify({"erro": f"Erro processando imagem: {e}", "matches": []}), 400
+
+    if enc_entrada is None:
+        return jsonify({
+            "erro": "Nenhum rosto detectado na imagem",
+            "matches": [],
+            "disponivel": True
+        }), 400
+
+    fotos = query_all("""
+        SELECT f.registro_id, f.embedding, r.nome
+        FROM fotos f
+        JOIN registros r ON r.id = f.registro_id
+        WHERE f.embedding IS NOT NULL
+    """)
+
+    matches = []
+    for f in fotos:
+        try:
+            emb_db = blob_para_embedding(f["embedding"])
+            if emb_db is None:
+                continue
+            dist = float(np.linalg.norm(enc_entrada - emb_db))
+            if dist <= FACE_THRESHOLD:
+                matches.append({
+                    "registro_id": f["registro_id"],
+                    "nome": f["nome"],
+                    "distancia": dist,
+                    "similaridade": max(0.0, 1.0 - dist)
+                })
+        except Exception as e:
+            print(f"[MATCH] {e}")
+            continue
+
+    # Agrupa por registro (melhor match)
+    por_reg = {}
+    for m in matches:
+        rid = m["registro_id"]
+        if rid not in por_reg or m["similaridade"] > por_reg[rid]["similaridade"]:
+            por_reg[rid] = m
+
+    ordenados = sorted(por_reg.values(), key=lambda x: -x["similaridade"])[:3]
+    registrar_auditoria("?", "BUSCA_FACIAL", detalhes=f"{len(ordenados)} match(es)")
+    return jsonify({"matches": ordenados, "disponivel": True})
+
+# ============================================================
+# ROTAS — AUDITORIA
+# ============================================================
 @app.route("/api/auditoria", methods=["GET"])
 def listar_auditoria():
     limite = int(request.args.get("limite", 500))
@@ -314,4 +463,13 @@ def _b64_to_bytes(b64):
 # BOOT
 # ============================================================
 if __name__ == "__main__":
+    print("=" * 60)
+    print("  Sistema de Procura API v3.3")
+    print(f"  bcrypt:            {'OK' if BCRYPT_OK else 'AUSENTE'}")
+    print(f"  numpy:             {'OK' if NUMPY_OK else 'AUSENTE'}")
+    print(f"  cv2:               {'OK' if CV2_OK else 'AUSENTE'}")
+    print(f"  face_recognition:  {'OK' if FACE_OK else 'AUSENTE'}")
+    print(f"  FACE_DISPONIVEL:   {FACE_DISPONIVEL}")
+    print(f"  Porta:             {PORT}")
+    print("=" * 60)
     app.run(host="0.0.0.0", port=PORT, debug=False)
