@@ -1,0 +1,65 @@
+# 🔍 Sistema de Procura v3.3
+
+Sistema profissional de cadastro e busca por características e reconhecimento facial.
+
+![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-3.3-blue)
+![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-green)
+
+---
+
+## 🌐 Demo Online
+
+👉 **[https://jorg3o3iras.github.io/sistema-procura/](https://jorg3o3iras.github.io/sistema-procura/)**
+
+### 🔐 Credenciais padrão
+- **Usuário:** `admin`
+- **Senha:** `admin123`
+
+> ⚠️ Os dados são armazenados localmente no navegador (`localStorage`) para demonstração. O backend real será integrado futuramente.
+
+---
+
+## 📸 Funcionalidades
+
+### ✅ Já implementado (frontend)
+- 🎨 Tema claro e escuro (com persistência)
+- 🔐 Tela de login com autenticação
+- 📊 Dashboard com estatísticas em tempo real
+- 📝 Cadastro completo de registros
+- 📷 Múltiplas fotos por registro (até 5)
+- 🔍 Pesquisa por características (nome, RG, apelido, tatuagens, sinais, etc.)
+- 📷 Busca por imagem (upload e webcam — análise simulada no frontend)
+- 🛡️ Auditoria de todas as ações do sistema
+- 💾 Backup e exportação de dados (JSON)
+- 📱 Layout responsivo
+
+### 🔜 Em desenvolvimento (backend)
+- 🧠 Reconhecimento facial real com `face_recognition` + OpenCV
+- 🗄️ Banco de dados SQLite com persistência
+- 🔒 Autenticação segura com bcrypt
+- 📄 Geração de PDF dos registros
+- ☁️ API REST com Flask/FastAPI
+
+---
+
+## 🛠️ Tecnologias
+
+### Frontend
+- HTML5
+- CSS3 (variáveis CSS, grid, flexbox)
+- JavaScript (vanilla, ES6+)
+- LocalStorage (persistência local)
+
+### Backend (planejado)
+- Python 3.10+
+- Flask / FastAPI
+- SQLite
+- face_recognition
+- OpenCV
+- bcrypt
+- ReportLab
+
+---
+
+## 📂 Estrutura do Projeto
