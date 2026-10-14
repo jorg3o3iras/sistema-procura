@@ -15,9 +15,6 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2 import pool
 
-import numpy as np
-import cv2
-
 try:
     import bcrypt
     BCRYPT_OK = True
