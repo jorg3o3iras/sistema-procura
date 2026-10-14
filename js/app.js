@@ -1,5 +1,5 @@
 /* ============================================================
-   SISTEMA DE PROCURA - APLICAÇÃO PRINCIPAL (FRONTEND)
+   SISTEMA DE PROCURA - APLICAÇÃO PRINCIPAL (API + Neon)
    ============================================================ */
 
 /* ============================================================
@@ -7,180 +7,10 @@
    ============================================================ */
 const AppState = {
     usuarioLogado: null,
-    registros: [],           // Mock de dados
+    registros: [],
     auditoria: [],
-    proximoId: 1,
-    tema: 'dark',
-    registroAtualId: null
-};
-
-/* ============================================================
-   DADOS MOCK (simulando SQLite)
-   ============================================================ */
-const MockDB = {
-    init() {
-        // Carrega dados de exemplo se não houver
-        const saved = localStorage.getItem('sistema-procura-db');
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                AppState.registros = data.registros || [];
-                AppState.auditoria = data.auditoria || [];
-                AppState.proximoId = data.proximoId || 1;
-                return;
-            } catch (e) {
-                console.warn('Falha ao carregar dados salvos', e);
-            }
-        }
-        this.seed();
-    },
-
-    seed() {
-        AppState.registros = [
-            {
-                id: 1, nome: 'João da Silva', rg: '12.345.678-9',
-                apelido: 'Joãozinho', tatuagem: 'Dragão no braço',
-                sinais: 'Cicatriz no queixo', cor: 'Parda',
-                altura: '1.75', data_nascimento: '15/03/1985',
-                cidade: 'São Paulo', observacoes: 'Registro de exemplo',
-                data_cadastro: '2025-01-10 10:30:00',
-                fotos: [], pdfs: []
-            },
-            {
-                id: 2, nome: 'Maria Santos', rg: '98.765.432-1',
-                apelido: 'Mari', tatuagem: 'Borboleta nas costas',
-                sinais: 'Pinta no rosto', cor: 'Branca',
-                altura: '1.62', data_nascimento: '22/07/1990',
-                cidade: 'Rio de Janeiro', observacoes: '',
-                data_cadastro: '2025-01-12 14:15:00',
-                fotos: [], pdfs: []
-            },
-            {
-                id: 3, nome: 'Carlos Pereira', rg: '11.222.333-4',
-                apelido: 'Carlão', tatuagem: '',
-                sinais: 'Tatuagem no pescoço', cor: 'Negra',
-                altura: '1.88', data_nascimento: '05/11/1978',
-                cidade: 'Belo Horizonte', observacoes: '',
-                data_cadastro: '2025-01-15 09:00:00',
-                fotos: [], pdfs: []
-            }
-        ];
-        AppState.proximoId = 4;
-        this.save();
-    },
-
-    save() {
-        try {
-            localStorage.setItem('sistema-procura-db', JSON.stringify({
-                registros: AppState.registros,
-                auditoria: AppState.auditoria,
-                proximoId: AppState.proximoId
-            }));
-        } catch (e) {
-            console.warn('Falha ao salvar dados', e);
-        }
-    },
-
-    // --- CRUD ---
-    listarTodos() {
-        return [...AppState.registros].sort((a, b) => a.nome.localeCompare(b.nome));
-    },
-
-    buscarPorId(id) {
-        return AppState.registros.find(r => r.id === id) || null;
-    },
-
-    nomeExiste(nome, excluirId = null) {
-        return AppState.registros.some(r =>
-            r.nome.toLowerCase() === nome.toLowerCase() && r.id !== excluirId
-        );
-    },
-
-    inserir(dados) {
-        const novo = {
-            id: AppState.proximoId++,
-            ...dados,
-            data_cadastro: new Date().toLocaleString('pt-BR').replace(',', ''),
-            fotos: dados.fotos || [],
-            pdfs: dados.pdfs || []
-        };
-        AppState.registros.push(novo);
-        this.save();
-        return novo.id;
-    },
-
-    atualizar(id, dados) {
-        const idx = AppState.registros.findIndex(r => r.id === id);
-        if (idx === -1) return 0;
-        AppState.registros[idx] = { ...AppState.registros[idx], ...dados };
-        this.save();
-        return 1;
-    },
-
-    excluir(id) {
-        AppState.registros = AppState.registros.filter(r => r.id !== id);
-        this.save();
-    },
-
-    estatisticas() {
-        const total = AppState.registros.length;
-        const comFoto = AppState.registros.filter(r => r.fotos && r.fotos.length > 0).length;
-        const indexados = AppState.registros.filter(r =>
-            r.fotos && r.fotos.some(f => f.embedding)
-        ).length;
-        const comPdf = AppState.registros.filter(r => r.pdfs && r.pdfs.length > 0).length;
-        const totalFotos = AppState.registros.reduce((acc, r) => acc + (r.fotos?.length || 0), 0);
-        return { total, comFoto, indexados, comPdf, semFoto: total - comFoto, totalFotos };
-    },
-
-    registrarAuditoria(usuario, acao, alvoId = null, detalhes = '') {
-        AppState.auditoria.unshift({
-            id: AppState.auditoria.length + 1,
-            usuario, acao, alvo_id: alvoId, detalhes,
-            timestamp: new Date().toLocaleString('pt-BR').replace(',', '')
-        });
-        if (AppState.auditoria.length > 1000) AppState.auditoria.pop();
-        this.save();
-    },
-
-    listarAuditoria(limite = 500) {
-        return AppState.auditoria.slice(0, limite);
-    }
-};
-
-/* ============================================================
-   AUTENTICAÇÃO (mock)
-   ============================================================ */
-const Auth = {
-    USERS_KEY: 'sistema-procura-users',
-
-    init() {
-        const saved = localStorage.getItem(this.USERS_KEY);
-        if (saved) return;
-        // Cria admin padrão
-        this.criarUsuario('admin', 'admin123', 'admin');
-    },
-
-    criarUsuario(username, senha, role = 'admin') {
-        const users = this.listarUsuarios();
-        if (users.some(u => u.username === username)) return false;
-        users.push({ username, senha: btoa(senha), role, criado_em: new Date().toISOString() });
-        localStorage.setItem(this.USERS_KEY, JSON.stringify(users));
-        return true;
-    },
-
-    listarUsuarios() {
-        try {
-            return JSON.parse(localStorage.getItem(this.USERS_KEY)) || [];
-        } catch { return []; }
-    },
-
-    autenticar(username, senha) {
-        const user = this.listarUsuarios().find(u => u.username === username);
-        if (!user) return null;
-        if (user.senha === btoa(senha)) return user;
-        return null;
-    }
+    registroAtualId: null,
+    tema: 'dark'
 };
 
 /* ============================================================
@@ -201,7 +31,6 @@ const Toast = {
             setTimeout(() => toast.remove(), 300);
         }, duracao);
     },
-
     success(msg) { this.show(msg, 'success'); },
     error(msg)   { this.show(msg, 'error'); },
     warning(msg) { this.show(msg, 'warning'); },
@@ -242,11 +71,11 @@ const Confirm = {
         });
     },
     init() {
-        document.getElementById('confirm-yes').addEventListener('click', () => {
+        document.getElementById('confirm-yes')?.addEventListener('click', () => {
             Modal.fechar('modal-confirm');
             if (this._resolve) this._resolve(true);
         });
-        document.getElementById('confirm-no').addEventListener('click', () => {
+        document.getElementById('confirm-no')?.addEventListener('click', () => {
             Modal.fechar('modal-confirm');
             if (this._resolve) this._resolve(false);
         });
@@ -298,7 +127,6 @@ const TabsManager = {
             btn.addEventListener('click', () => this.ativar(btn.dataset.tab));
         });
     },
-
     ativar(nome) {
         document.querySelectorAll('.tab-btn').forEach(b => {
             b.classList.toggle('active', b.dataset.tab === nome);
@@ -306,12 +134,8 @@ const TabsManager = {
         document.querySelectorAll('.tab-panel').forEach(p => {
             p.classList.toggle('active', p.id === `tab-${nome}`);
         });
-
-        // Atualiza dados ao entrar
         if (nome === 'dashboard') Dashboard.atualizar();
         if (nome === 'auditoria') Auditoria.atualizar();
-
-        // Salva última aba
         localStorage.setItem('sistema-procura-tab', nome);
     }
 };
@@ -335,15 +159,13 @@ const Toolbar = {
                 }
             });
         });
-
         document.getElementById('btn-logout')?.addEventListener('click', () => AuthUI.logout());
     },
-
-    backup() {
+    async backup() {
         try {
+            const registros = await API.listarRegistros();
             const dados = {
-                registros: AppState.registros,
-                auditoria: AppState.auditoria,
+                registros,
                 exportado_em: new Date().toISOString()
             };
             const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
@@ -353,16 +175,15 @@ const Toolbar = {
             a.download = `backup_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '_')}.json`;
             a.click();
             URL.revokeObjectURL(url);
-            MockDB.registrarAuditoria(AppState.usuarioLogado?.username, 'BACKUP');
-            Toast.success('Backup exportado com sucesso!');
+            Toast.success('Backup exportado!');
         } catch (e) {
-            Toast.error('Erro ao exportar backup: ' + e.message);
+            Toast.error('Erro: ' + e.message);
         }
     }
 };
 
 /* ============================================================
-   AUTENTICAÇÃO - UI
+   AUTENTICAÇÃO
    ============================================================ */
 const AuthUI = {
     init() {
@@ -378,56 +199,77 @@ const AuthUI = {
         });
     },
 
-    login() {
+    async login() {
         const username = document.getElementById('login-user').value.trim();
         const senha = document.getElementById('login-pass').value;
         if (!username || !senha) {
             Toast.warning('Preencha usuário e senha.');
             return;
         }
-        const user = Auth.autenticar(username, senha);
-        if (!user) {
-            Toast.error('Usuário ou senha incorretos.');
-            MockDB.registrarAuditoria(username, 'LOGIN_FALHA');
-            return;
+        try {
+            Loading.show('Autenticando...');
+            const user = await API.login(username, senha);
+            AppState.usuarioLogado = user;
+            // Salva apenas a sessão, não os dados
+            sessionStorage.setItem('sp_user', JSON.stringify(user));
+            Loading.hide();
+            this.mostrarApp();
+            Toast.success(`Bem-vindo, ${user.username}!`);
+        } catch (e) {
+            Loading.hide();
+            Toast.error(e.message);
         }
-        AppState.usuarioLogado = user;
-        MockDB.registrarAuditoria(username, 'LOGIN_OK');
-        this.mostrarApp();
     },
 
     mostrarApp() {
         document.getElementById('login-screen').classList.remove('active');
         document.getElementById('app-screen').classList.add('active');
         document.getElementById('user-display').textContent = AppState.usuarioLogado.username;
-        // Inicializa módulos
         Dashboard.atualizar();
         Cadastro.atualizarListasDinamicas();
         atualizarStatusBar();
     },
 
-    logout() {
-        Confirm.abrir('Sair', 'Deseja realmente sair do sistema?').then(ok => {
-            if (!ok) return;
-            MockDB.registrarAuditoria(AppState.usuarioLogado?.username, 'LOGOUT');
-            AppState.usuarioLogado = null;
-            AppState.registroAtualId = null;
-            document.getElementById('app-screen').classList.remove('active');
-            document.getElementById('login-screen').classList.add('active');
-            document.getElementById('login-form').reset();
-            document.getElementById('login-user').focus();
-        });
+    async logout() {
+        const ok = await Confirm.abrir('Sair', 'Deseja realmente sair do sistema?');
+        if (!ok) return;
+        AppState.usuarioLogado = null;
+        AppState.registroAtualId = null;
+        sessionStorage.removeItem('sp_user');
+        document.getElementById('app-screen').classList.remove('active');
+        document.getElementById('login-screen').classList.add('active');
+        document.getElementById('login-form').reset();
+        document.getElementById('login-user').focus();
+    },
+
+    // Se o usuário já estava logado na mesma sessão do navegador
+    tentarRestaurarSessao() {
+        const saved = sessionStorage.getItem('sp_user');
+        if (saved) {
+            try {
+                AppState.usuarioLogado = JSON.parse(saved);
+                this.mostrarApp();
+                return true;
+            } catch (e) {
+                sessionStorage.removeItem('sp_user');
+            }
+        }
+        return false;
     }
 };
 
 /* ============================================================
    STATUS BAR
    ============================================================ */
-function atualizarStatusBar() {
-    const st = MockDB.estatisticas();
-    const user = AppState.usuarioLogado?.username || '—';
-    document.getElementById('status-text').textContent =
-        `👤 ${user} | 📊 ${st.total} registros | 📷 ${st.comFoto} com foto | 🧠 ${st.indexados} indexados | 📄 ${st.comPdf} com PDF | v3.3`;
+async function atualizarStatusBar() {
+    try {
+        const st = await API.estatisticas();
+        const user = AppState.usuarioLogado?.username || '—';
+        document.getElementById('status-text').textContent =
+            `👤 ${user} | 📊 ${st.total} registros | 📷 ${st.com_foto} com foto | 🧠 ${st.com_embedding} indexados | 📄 ${st.com_pdf} com PDF | v3.3`;
+    } catch (e) {
+        document.getElementById('status-text').textContent = 'Backend offline';
+    }
 }
 
 /* ============================================================
@@ -435,8 +277,6 @@ function atualizarStatusBar() {
    ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
     ThemeManager.init();
-    MockDB.init();
-    Auth.init();
     Confirm.init();
     TabsManager.init();
     Toolbar.init();
@@ -447,14 +287,15 @@ document.addEventListener('DOMContentLoaded', () => {
     BuscaImagem.init();
     Auditoria.init();
 
-    // Aplica última aba
     const ultimaTab = localStorage.getItem('sistema-procura-tab') || 'dashboard';
     TabsManager.ativar(ultimaTab);
 
-    // Foca no usuário do login
+    // Tenta restaurar sessão
+    AuthUI.tentarRestaurarSessao();
+
     document.getElementById('login-user')?.focus();
 
-    // Atalhos de teclado
+    // Atalhos
     document.addEventListener('keydown', (e) => {
         if (!AppState.usuarioLogado) return;
         if (e.ctrlKey && e.key === 'n') { e.preventDefault(); Cadastro.novo(); }
