@@ -1,13 +1,12 @@
 /* ============================================================
-   CADASTRO DE REGISTROS
+   CADASTRO — CRUD via API + Neon
    ============================================================ */
 const Cadastro = {
-    fotos: [],       // [{ dataUrl, embedding, status, motivos }]
+    fotos: [],
     MAX_FOTOS: 5,
     registroSelecionado: null,
 
     init() {
-        // Botões principais
         document.getElementById('btn-cadastrar')?.addEventListener('click', () => this.cadastrar());
         document.getElementById('btn-atualizar')?.addEventListener('click', () => this.atualizar());
         document.getElementById('btn-limpar')?.addEventListener('click', () => this.limpar());
@@ -15,7 +14,6 @@ const Cadastro = {
         document.getElementById('btn-listar')?.addEventListener('click', () => this.listar());
         document.getElementById('btn-gerar-pdf')?.addEventListener('click', () => this.gerarPDF());
 
-        // Fotos
         document.getElementById('btn-add-foto')?.addEventListener('click', () => {
             document.getElementById('foto-input').click();
         });
@@ -24,7 +22,6 @@ const Cadastro = {
             e.target.value = '';
         });
 
-        // Listas dinâmicas
         document.querySelectorAll('[data-add-field]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const lista = document.getElementById(btn.dataset.addField);
@@ -32,7 +29,6 @@ const Cadastro = {
             });
         });
 
-        // Inicializa listas com 1 campo
         this.atualizarListasDinamicas();
     },
 
@@ -55,9 +51,7 @@ const Cadastro = {
             <input type="text" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(valor)}">
             <button type="button" class="dynamic-remove" title="Remover">❌</button>
         `;
-        const input = item.querySelector('input');
         const btn = item.querySelector('.dynamic-remove');
-
         btn.addEventListener('click', () => {
             if (container.children.length <= 1) {
                 Toast.warning('Mantenha pelo menos 1 campo.');
@@ -66,7 +60,6 @@ const Cadastro = {
             item.remove();
             this._atualizarBotoesRemover(container);
         });
-
         container.appendChild(item);
         this._atualizarBotoesRemover(container);
         return item;
@@ -87,8 +80,11 @@ const Cadastro = {
             .filter(v => v);
     },
 
-    limparListasDinamicas() {
-        ['lista-tatuagens', 'lista-sinais'].forEach(id => {
+    limparListasDinamicas(prefix = '') {
+        const ids = prefix === 'pesq'
+            ? ['pesq-lista-tatuagens', 'pesq-lista-sinais']
+            : ['lista-tatuagens', 'lista-sinais'];
+        ids.forEach(id => {
             const container = document.getElementById(id);
             if (!container) return;
             container.innerHTML = '';
@@ -122,18 +118,11 @@ const Cadastro = {
             }
             try {
                 const dataUrl = await this.fileToDataURL(file);
-                const info = await this.analisarImagem(dataUrl);
                 this.fotos.push({
                     dataUrl,
                     nome: file.name,
-                    embedding: info.embedding,
-                    status: info.status,
-                    motivos: info.motivos || []
+                    status: 'ok'
                 });
-
-                if (info.motivos && info.motivos.length > 0) {
-                    Toast.warning(`Foto "${file.name}" adicionada, mas: ${info.motivos[0]}`);
-                }
             } catch (e) {
                 console.error(e);
                 Toast.error(`Erro ao processar "${file.name}"`);
@@ -151,51 +140,6 @@ const Cadastro = {
         });
     },
 
-    /**
-     * Análise de imagem no frontend.
-     * NOTA: No frontend puro, NÃO temos face_recognition nem OpenCV.
-     * Aqui simulamos a análise. Quando conectar ao backend Python, esta
-     * função fará uma chamada HTTP para o servidor.
-     */
-    async analisarImagem(dataUrl) {
-        // === SIMULAÇÃO (remover quando conectar ao backend) ===
-        return new Promise(resolve => {
-            const img = new Image();
-            img.onload = () => {
-                // Heurística simples: imagem muito pequena ou muito escura/clara = alerta
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imageData.data;
-                let soma = 0;
-                for (let i = 0; i < data.length; i += 4) {
-                    soma += (data[i] + data[i + 1] + data[i + 2]) / 3;
-                }
-                const brilho = soma / (data.length / 4);
-
-                const motivos = [];
-                if (brilho < 40) motivos.push('Imagem muito escura');
-                if (brilho > 220) motivos.push('Imagem muito clara');
-                if (img.width < 100 || img.height < 100) motivos.push('Imagem muito pequena');
-
-                // Gera um embedding simulado (hash do dataUrl)
-                const embedding = 'sim_' + btoa(dataUrl.slice(0, 50)).slice(0, 20);
-
-                resolve({
-                    embedding,
-                    status: motivos.length === 0 ? 'ok' : (motivos.length === 1 ? 'warn' : 'bad'),
-                    motivos
-                });
-            };
-            img.onerror = () => resolve({ embedding: null, status: 'bad', motivos: ['Imagem inválida'] });
-            img.src = dataUrl;
-        });
-    },
-
     renderizarFotos() {
         const grid = document.getElementById('fotos-grid');
         if (!grid) return;
@@ -203,14 +147,10 @@ const Cadastro = {
 
         this.fotos.forEach((foto, index) => {
             const card = document.createElement('div');
-            card.className = `foto-card status-${foto.status}`;
-            const statusTexto = foto.status === 'ok' ? '✅ Boa'
-                : foto.status === 'warn' ? '⚠️ ' + (foto.motivos[0] || 'Atenção')
-                : '❌ ' + (foto.motivos[0] || 'Ruim');
-
+            card.className = 'foto-card status-ok';
             card.innerHTML = `
                 <img src="${foto.dataUrl}" alt="Foto ${index + 1}">
-                <div class="foto-status">${escapeHtml(statusTexto)}</div>
+                <div class="foto-status">✅ Foto</div>
                 <button type="button" class="foto-remove" data-index="${index}">🗑️ Remover</button>
             `;
             card.querySelector('.foto-remove').addEventListener('click', () => {
@@ -247,7 +187,6 @@ const Cadastro = {
         return erros;
     },
 
-    /* ============ CRUD ============ */
     coletar() {
         return {
             nome: document.getElementById('cad-nome').value.trim(),
@@ -260,11 +199,8 @@ const Cadastro = {
             observacoes: document.getElementById('cad-observacoes').value.trim(),
             tatuagens: this.getValoresLista('lista-tatuagens'),
             sinais: this.getValoresLista('lista-sinais'),
-            fotos: this.fotos.map(f => ({
-                dataUrl: f.dataUrl,
-                embedding: f.embedding,
-                status: f.status
-            }))
+            fotos: this.fotos.map(f => ({ dataUrl: f.dataUrl })),
+            usuario: AppState.usuarioLogado?.username || '?'
         };
     },
 
@@ -276,35 +212,23 @@ const Cadastro = {
         }
 
         const dados = this.coletar();
-        if (MockDB.nomeExiste(dados.nome)) {
-            Toast.warning(`Já existe registro com nome "${dados.nome}".`);
-            return;
+
+        try {
+            Loading.show('Cadastrando...');
+            const res = await API.criarRegistro(dados);
+            Loading.hide();
+            Toast.success(`"${dados.nome}" cadastrado! (ID ${res.id})`);
+            this.limpar();
+            Dashboard.atualizar();
+        } catch (e) {
+            Loading.hide();
+            Toast.error('Erro: ' + e.message);
         }
-
-        const semRosto = dados.fotos.filter(f => !f.embedding).length;
-        if (semRosto > 0) {
-            const ok = await Confirm.abrir('Atenção',
-                `${semRosto} foto(s) não têm rosto detectado.\nElas não serão usadas na busca facial.\n\nDeseja cadastrar mesmo assim?`);
-            if (!ok) return;
-        }
-
-        const id = MockDB.inserir(dados);
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'CADASTRO', id,
-            `Nome: ${dados.nome} | ${dados.fotos.length} foto(s)`);
-
-        if (dados.fotos.length < 3) {
-            Toast.info(`"${dados.nome}" cadastrado! 💡 Adicione 3-5 fotos para melhorar a busca facial.`);
-        } else {
-            Toast.success(`"${dados.nome}" cadastrado com ${dados.fotos.length} fotos!`);
-        }
-
-        this.limpar();
-        Dashboard.atualizar();
     },
 
     async atualizar() {
         if (!AppState.registroAtualId) {
-            Toast.warning('Nenhum registro carregado. Selecione em "Cadastrados".');
+            Toast.warning('Nenhum registro carregado. Use "Cadastrados".');
             return;
         }
         const erros = this.validarCampos();
@@ -313,15 +237,17 @@ const Cadastro = {
             return;
         }
         const dados = this.coletar();
-        if (MockDB.nomeExiste(dados.nome, AppState.registroAtualId)) {
-            Toast.warning(`Já existe outro registro com nome "${dados.nome}".`);
-            return;
+
+        try {
+            Loading.show('Atualizando...');
+            await API.atualizarRegistro(AppState.registroAtualId, dados);
+            Loading.hide();
+            Toast.success('Registro atualizado!');
+            Dashboard.atualizar();
+        } catch (e) {
+            Loading.hide();
+            Toast.error('Erro: ' + e.message);
         }
-        MockDB.atualizar(AppState.registroAtualId, dados);
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'ATUALIZACAO',
-            AppState.registroAtualId, `Nome: ${dados.nome}`);
-        Toast.success('Registro atualizado!');
-        Dashboard.atualizar();
     },
 
     async excluir() {
@@ -329,16 +255,21 @@ const Cadastro = {
             Toast.warning('Nenhum registro carregado.');
             return;
         }
-        const u = MockDB.buscarPorId(AppState.registroAtualId);
-        if (!u) return;
         const ok = await Confirm.abrir('Excluir Registro',
-            `Excluir "${u.nome}"?\n\nEsta ação não pode ser desfeita.`);
+            `Excluir registro ID ${AppState.registroAtualId}?`);
         if (!ok) return;
-        MockDB.excluir(u.id);
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'EXCLUSAO', u.id, `Nome: ${u.nome}`);
-        Toast.success('Registro excluído.');
-        this.limpar();
-        Dashboard.atualizar();
+
+        try {
+            Loading.show('Excluindo...');
+            await API.excluirRegistro(AppState.registroAtualId);
+            Loading.hide();
+            Toast.success('Registro excluído.');
+            this.limpar();
+            Dashboard.atualizar();
+        } catch (e) {
+            Loading.hide();
+            Toast.error('Erro: ' + e.message);
+        }
     },
 
     limpar() {
@@ -351,7 +282,7 @@ const Cadastro = {
         this.limparListasDinamicas();
         this.limparFotos();
         AppState.registroAtualId = null;
-        document.getElementById('cad-nome').focus();
+        document.getElementById('cad-nome')?.focus();
     },
 
     novo() {
@@ -359,9 +290,8 @@ const Cadastro = {
         TabsManager.ativar('cadastros');
     },
 
-    /* ============ LISTAGEM ============ */
-    listar() {
-        const registros = MockDB.listarTodos();
+    async listar() {
+        const registros = await API.listarRegistros();
         const tbody = document.querySelector('#table-registros tbody');
         const filtro = document.getElementById('filtro-registros');
 
@@ -376,8 +306,8 @@ const Cadastro = {
                     <td>${escapeHtml(u.nome)}</td>
                     <td>${escapeHtml(u.apelido || '')}</td>
                     <td>${escapeHtml(u.cidade || '')}</td>
-                    <td>${u.fotos?.length || 0}</td>
-                    <td>${u.fotos?.filter(f => f.embedding).length || 0}</td>
+                    <td>—</td>
+                    <td>—</td>
                 </tr>
             `).join('') || '<tr><td colspan="6" class="placeholder-text">Nenhum registro</td></tr>';
 
@@ -396,34 +326,39 @@ const Cadastro = {
 
         document.getElementById('btn-reg-abrir').onclick = () => {
             const sel = tbody.querySelector('tr.selected');
-            if (!sel) { Toast.warning('Selecione um registro na tabela.'); return; }
+            if (!sel) { Toast.warning('Selecione um registro.'); return; }
             this._abrirDoModal(parseInt(sel.dataset.id));
         };
 
         document.getElementById('btn-reg-excluir').onclick = async () => {
             const sel = tbody.querySelector('tr.selected');
-            if (!sel) { Toast.warning('Selecione um registro na tabela.'); return; }
+            if (!sel) { Toast.warning('Selecione um registro.'); return; }
             const id = parseInt(sel.dataset.id);
-            const u = MockDB.buscarPorId(id);
-            const ok = await Confirm.abrir('Excluir', `Excluir "${u.nome}"?`);
+            const ok = await Confirm.abrir('Excluir', `Excluir registro ID ${id}?`);
             if (!ok) return;
-            MockDB.excluir(id);
-            MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'EXCLUSAO', id, u.nome);
-            Toast.success('Excluído.');
-            this.listar();
-            Dashboard.atualizar();
+            try {
+                await API.excluirRegistro(id);
+                Toast.success('Excluído.');
+                Modal.fechar('modal-registros');
+                Dashboard.atualizar();
+            } catch (e) {
+                Toast.error(e.message);
+            }
         };
 
         Modal.abrir('modal-registros');
     },
 
-    _abrirDoModal(id) {
-        const u = MockDB.buscarPorId(id);
-        if (!u) return;
-        Modal.fechar('modal-registros');
-        this.preencher(u);
-        TabsManager.ativar('cadastros');
-        Toast.info(`Registro "${u.nome}" carregado.`);
+    async _abrirDoModal(id) {
+        try {
+            const u = await API.buscarRegistro(id);
+            Modal.fechar('modal-registros');
+            this.preencher(u);
+            TabsManager.ativar('cadastros');
+            Toast.info(`Registro "${u.nome}" carregado.`);
+        } catch (e) {
+            Toast.error(e.message);
+        }
     },
 
     preencher(u) {
@@ -443,9 +378,7 @@ const Cadastro = {
 
         this.fotos = (u.fotos || []).map(f => ({
             dataUrl: f.dataUrl,
-            embedding: f.embedding,
-            status: f.status || 'ok',
-            motivos: f.motivos || []
+            status: 'ok'
         }));
         this.renderizarFotos();
     },
@@ -485,9 +418,8 @@ const Cadastro = {
             Toast.warning('Nenhum registro carregado.');
             return;
         }
-        const u = MockDB.buscarPorId(AppState.registroAtualId);
-        if (!u) return;
-        const texto = `
+        API.buscarRegistro(AppState.registroAtualId).then(u => {
+            const texto = `
 REGISTRO: ${u.nome}
 ID: ${u.id}
 Apelido: ${u.apelido || '—'}
@@ -501,22 +433,22 @@ Cadastro: ${u.data_cadastro || '—'}
 TATUAGENS:
 ${(u.tatuagens || ['—']).map(t => '• ' + t).join('\n')}
 
-SINAIS PARTICULARES:
+SINAIS:
 ${(u.sinais || ['—']).map(s => '• ' + s).join('\n')}
 
 OBSERVAÇÕES:
 ${u.observacoes || '—'}
 
 Gerado em ${new Date().toLocaleString('pt-BR')} - Sistema de Procura v3.3
-        `.trim();
-        const blob = new Blob([texto], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `registro_${u.id}_${u.nome.replace(/\s+/g, '_')}.txt`;
-        a.click();
-        URL.revokeObjectURL(url);
-        MockDB.registrarAuditoria(AppState.usuarioLogado.username, 'PDF_REGISTRO', u.id, u.nome);
-        Toast.success('Documento gerado! (Para PDF real, conecte ao backend)');
+            `.trim();
+            const blob = new Blob([texto], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `registro_${u.id}_${u.nome.replace(/\s+/g, '_')}.txt`;
+            a.click();
+            URL.revokeObjectURL(url);
+            Toast.success('Documento gerado!');
+        }).catch(e => Toast.error(e.message));
     }
 };
