@@ -5,7 +5,7 @@
 
 const BuscaImagem = {
     imagemEntrada: null,
-    descriptorEntrada: null,        // 128 números gerados pelo FaceRec
+    descriptorEntrada: null,
     ultimoMatchId: null,
     webcamStream: null,
 
@@ -80,7 +80,6 @@ const BuscaImagem = {
         this._mostrarPreview(dataUrl);
         this._fecharWebcam();
 
-        // Processa descritor a partir da captura
         Toast.info('Detectando rosto...');
         try {
             const img = await FaceRec.carregarImagem(dataUrl);
@@ -136,7 +135,7 @@ const BuscaImagem = {
 
             const matches = res.matches || [];
             if (matches.length === 0) {
-                this._renderizarMatches([]);
+                await this._renderizarMatches([]);
                 document.getElementById('img-detalhe-foto').textContent = 'Sem correspondência';
                 document.getElementById('img-detalhe-info').innerHTML =
                     '<p class="placeholder-text">Nenhum rosto parecido encontrado.</p>';
@@ -146,7 +145,7 @@ const BuscaImagem = {
                 return;
             }
 
-            this._renderizarMatches(matches);
+            await this._renderizarMatches(matches);
             const melhor = matches[0];
             await this._mostrarDetalhe(melhor.registro_id, melhor.similaridade);
 
@@ -163,7 +162,7 @@ const BuscaImagem = {
         }
     },
 
-    _renderizarMatches(matches) {
+    async _renderizarMatches(matches) {
         const grid = document.getElementById('matches-grid');
         grid.innerHTML = '';
 
@@ -178,10 +177,23 @@ const BuscaImagem = {
                           : m.similaridade >= 0.55 ? 'conf-media'
                           : 'conf-baixa';
                 card.classList.add(conf);
-                card.innerHTML = `
+
+                // Tenta carregar a foto do registro
+                let fotoHtml = `
                     <div style="aspect-ratio:1;background:var(--bg-dark);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--fg-secondary);">
                         #${m.registro_id}
-                    </div>
+                    </div>`;
+                try {
+                    const u = await API.buscarRegistro(m.registro_id);
+                    if (u.fotos && u.fotos.length > 0) {
+                        fotoHtml = `<img src="${u.fotos[0].dataUrl}" alt="${escapeHtml(u.nome)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:6px;">`;
+                    }
+                } catch (e) {
+                    console.warn('Erro ao carregar foto do match:', e);
+                }
+
+                card.innerHTML = `
+                    ${fotoHtml}
                     <div class="match-name">${escapeHtml(m.nome)}</div>
                     <div style="font-size:9pt;">Confiança: ${pct}%</div>
                 `;
@@ -254,14 +266,14 @@ const BuscaImagem = {
         }
     },
 
-    limpar() {
+    async limpar() {
         this.imagemEntrada = null;
         this.descriptorEntrada = null;
         this.ultimoMatchId = null;
         this._fecharWebcam();
         const preview = document.getElementById('preview-imagem');
         preview.innerHTML = '<span class="placeholder-text">Nenhuma imagem</span>';
-        this._renderizarMatches([]);
+        await this._renderizarMatches([]);
         document.getElementById('img-detalhe-foto').textContent = 'Sem dados';
         document.getElementById('img-detalhe-info').innerHTML =
             '<p class="placeholder-text">Os dados do registro mais provável aparecerão aqui após a busca.</p>';
