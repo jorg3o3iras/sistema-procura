@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Procura v3.3 - Backend Flask + Neon PostgreSQL
-Reconhecimento facial OPCIONAL (ativa automaticamente se instalado)
+Reconhecimento facial via Hugging Face Inference API
 """
 import os
 import base64
@@ -15,36 +15,14 @@ from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2 import pool
+import numpy as np
+import requests
 
-# ============================================================
-# IMPORTAÇÕES OPCIONAIS (reconhecimento facial)
-# ============================================================
 try:
     import bcrypt
     BCRYPT_OK = True
 except ImportError:
     BCRYPT_OK = False
-
-try:
-    import numpy as np
-    NUMPY_OK = True
-except ImportError:
-    NUMPY_OK = False
-
-try:
-    import cv2
-    CV2_OK = True
-except ImportError:
-    CV2_OK = False
-
-try:
-    import face_recognition
-    FACE_OK = True
-except ImportError:
-    FACE_OK = False
-
-FACE_DISPONIVEL = FACE_OK and CV2_OK and NUMPY_OK
-FACE_THRESHOLD = 0.6
 
 # ============================================================
 # CONFIG
@@ -53,10 +31,16 @@ load_dotenv()
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 PORT = int(os.environ.get("PORT", 5000))
+
+FACE_THRESHOLD = 0.6
+HF_MODEL = "https://api-inference.huggingface.co/models/opencv/face_recognition"
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL nao configurada")
+
+FACE_OK = bool(HF_TOKEN)
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
@@ -128,26 +112,39 @@ def verificar_senha(senha: str, hash_arm: str) -> bool:
     return False
 
 # ============================================================
-# FACE — helpers
+# FACE — Hugging Face Inference API
 # ============================================================
 def gerar_embedding(img_bytes: bytes):
-    """Gera embedding 128D a partir de bytes de imagem. Retorna None se indisponível."""
-    if not FACE_DISPONIVEL:
+    """Chama o Hugging Face para gerar embedding de rosto."""
+    if not HF_TOKEN:
         return None
     try:
-        arr = np.frombuffer(img_bytes, np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
+        headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+        res = requests.post(HF_MODEL, headers=headers, data=img_bytes, timeout=30)
+
+        if res.status_code != 200:
+            print(f"[HF] status {res.status_code}: {res.text[:200]}")
             return None
-        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        locs = face_recognition.face_locations(rgb, model="hog")
-        if not locs:
-            return None
-        locs = sorted(locs, key=lambda r: (r[2] - r[0]) * (r[1] - r[3]), reverse=True)
-        enc = face_recognition.face_encodings(rgb, known_face_locations=[locs[0]])
-        return enc[0] if enc else None
+
+        dados = res.json()
+
+        # Formato 1: {"embeddings": [[...]], "num_faces": N}
+        if isinstance(dados, dict):
+            embs = dados.get("embeddings") or dados.get("embedding")
+            if embs:
+                if isinstance(embs[0], list):
+                    return np.array(embs[0], dtype=np.float32)
+                return np.array(embs, dtype=np.float32)
+
+        # Formato 2: lista direta
+        if isinstance(dados, list) and len(dados) > 0:
+            if isinstance(dados[0], list):
+                return np.array(dados[0], dtype=np.float32)
+            return np.array(dados, dtype=np.float32)
+
+        return None
     except Exception as e:
-        print(f"[FACE] {e}")
+        print(f"[HF] erro: {e}")
         return None
 
 def embedding_para_blob(emb):
@@ -183,7 +180,7 @@ def home():
     return jsonify({
         "app": "Sistema de Procura API",
         "version": "3.3",
-        "face_recognition": FACE_DISPONIVEL,
+        "face_recognition": FACE_OK,
         "bcrypt": BCRYPT_OK,
         "status": "online"
     })
@@ -195,7 +192,7 @@ def health():
         return jsonify({
             "db": "ok",
             "status": "healthy",
-            "face_recognition": FACE_DISPONIVEL
+            "face_recognition": FACE_OK
         })
     except Exception as e:
         return jsonify({"db": "error", "detalhes": str(e)}), 500
@@ -244,7 +241,7 @@ def estatisticas():
         return jsonify({"erro": str(e)}), 500
 
 # ============================================================
-# ROTAS — REGISTROS (CRUD)
+# ROTAS — REGISTROS
 # ============================================================
 @app.route("/api/registros", methods=["GET"])
 def listar_registros():
@@ -295,12 +292,11 @@ def criar_registro():
     ), returning=True)
     rid = row["id"]
 
-    # Processa fotos
     for i, foto in enumerate(data.get("fotos") or []):
         try:
             img_bytes = _b64_to_bytes(foto["dataUrl"])
             emb_blob = None
-            if FACE_DISPONIVEL:
+            if FACE_OK:
                 emb = gerar_embedding(img_bytes)
                 emb_blob = embedding_para_blob(emb)
             execute(
@@ -342,7 +338,7 @@ def atualizar_registro(rid):
             try:
                 img_bytes = _b64_to_bytes(foto["dataUrl"])
                 emb_blob = None
-                if FACE_DISPONIVEL:
+                if FACE_OK:
                     emb = gerar_embedding(img_bytes)
                     emb_blob = embedding_para_blob(emb)
                 execute(
@@ -368,9 +364,9 @@ def excluir_registro(rid):
 # ============================================================
 @app.route("/api/busca-facial", methods=["POST"])
 def busca_facial():
-    if not FACE_DISPONIVEL:
+    if not FACE_OK:
         return jsonify({
-            "erro": "Busca facial nao disponivel neste plano do servidor",
+            "erro": "HF_TOKEN nao configurado",
             "matches": [],
             "disponivel": False
         }), 503
@@ -406,6 +402,8 @@ def busca_facial():
             emb_db = blob_para_embedding(f["embedding"])
             if emb_db is None:
                 continue
+            if len(emb_db) != len(enc_entrada):
+                continue
             dist = float(np.linalg.norm(enc_entrada - emb_db))
             if dist <= FACE_THRESHOLD:
                 matches.append({
@@ -418,7 +416,6 @@ def busca_facial():
             print(f"[MATCH] {e}")
             continue
 
-    # Agrupa por registro (melhor match)
     por_reg = {}
     for m in matches:
         rid = m["registro_id"]
@@ -466,10 +463,7 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  Sistema de Procura API v3.3")
     print(f"  bcrypt:            {'OK' if BCRYPT_OK else 'AUSENTE'}")
-    print(f"  numpy:             {'OK' if NUMPY_OK else 'AUSENTE'}")
-    print(f"  cv2:               {'OK' if CV2_OK else 'AUSENTE'}")
-    print(f"  face_recognition:  {'OK' if FACE_OK else 'AUSENTE'}")
-    print(f"  FACE_DISPONIVEL:   {FACE_DISPONIVEL}")
+    print(f"  Hugging Face:      {'OK' if FACE_OK else 'AUSENTE (HF_TOKEN vazio)'}")
     print(f"  Porta:             {PORT}")
     print("=" * 60)
     app.run(host="0.0.0.0", port=PORT, debug=False)
