@@ -1,6 +1,39 @@
 /* ============================================================
-   CADASTRO — CRUD via API + Neon
+   CADASTRO — CRUD via API + Neon (CORRIGIDO)
    ============================================================ */
+
+/**
+ * Converte valor retornado pela API em array.
+ * Aceita:
+ *   - array (já é o esperado)
+ *   - string "a; b; c" (backend retorna assim)
+ *   - null/undefined (retorna [])
+ */
+function _paraArray(valor) {
+    if (!valor) return [];
+    if (Array.isArray(valor)) {
+        return valor.map(v => String(v).trim()).filter(v => v);
+    }
+    if (typeof valor === 'string') {
+        return valor.split(';').map(s => s.trim()).filter(s => s);
+    }
+    return [];
+}
+
+/**
+ * Normaliza um objeto de registro recebido da API.
+ * Garante que tatuagens e sinais sejam sempre arrays.
+ */
+function _normalizarRegistro(u) {
+    if (!u) return u;
+    return {
+        ...u,
+        tatuagens: _paraArray(u.tatuagens || u.tatuagem),
+        sinais: _paraArray(u.sinais),
+        fotos: Array.isArray(u.fotos) ? u.fotos : []
+    };
+}
+
 const Cadastro = {
     fotos: [],
     MAX_FOTOS: 5,
@@ -45,6 +78,7 @@ const Cadastro = {
     },
 
     adicionarCampoDinamico(container, placeholder, valor = '') {
+        if (!container) return null;
         const item = document.createElement('div');
         item.className = 'dynamic-item';
         item.innerHTML = `
@@ -96,8 +130,10 @@ const Cadastro = {
     setListaDinamica(id, valores) {
         const container = document.getElementById(id);
         if (!container) return;
+        // Garante que é array
+        valores = _paraArray(valores);
         container.innerHTML = '';
-        if (!valores || valores.length === 0) {
+        if (valores.length === 0) {
             this.adicionarCampoDinamico(container,
                 id.includes('tatuagens') ? 'Descrição da tatuagem' : 'Descrição do sinal');
             return;
@@ -160,8 +196,10 @@ const Cadastro = {
             grid.appendChild(card);
         });
 
-        document.getElementById('fotos-count').textContent = this.fotos.length;
-        document.getElementById('btn-add-foto').disabled = this.fotos.length >= this.MAX_FOTOS;
+        const count = document.getElementById('fotos-count');
+        if (count) count.textContent = this.fotos.length;
+        const btnAdd = document.getElementById('btn-add-foto');
+        if (btnAdd) btnAdd.disabled = this.fotos.length >= this.MAX_FOTOS;
     },
 
     limparFotos() {
@@ -291,67 +329,72 @@ const Cadastro = {
     },
 
     async listar() {
-        const registros = await API.listarRegistros();
-        const tbody = document.querySelector('#table-registros tbody');
-        const filtro = document.getElementById('filtro-registros');
+        try {
+            const registros = (await API.listarRegistros()).map(_normalizarRegistro);
+            const tbody = document.querySelector('#table-registros tbody');
+            const filtro = document.getElementById('filtro-registros');
 
-        const popular = (termo = '') => {
-            termo = termo.toLowerCase();
-            const filtrados = registros.filter(r =>
-                !termo || r.nome.toLowerCase().includes(termo) || (r.apelido || '').toLowerCase().includes(termo)
-            );
-            tbody.innerHTML = filtrados.map(u => `
-                <tr data-id="${u.id}">
-                    <td>${u.id}</td>
-                    <td>${escapeHtml(u.nome)}</td>
-                    <td>${escapeHtml(u.apelido || '')}</td>
-                    <td>${escapeHtml(u.cidade || '')}</td>
-                    <td>—</td>
-                    <td>—</td>
-                </tr>
-            `).join('') || '<tr><td colspan="6" class="placeholder-text">Nenhum registro</td></tr>';
+            const popular = (termo = '') => {
+                termo = termo.toLowerCase();
+                const filtrados = registros.filter(r =>
+                    !termo || r.nome.toLowerCase().includes(termo) || (r.apelido || '').toLowerCase().includes(termo)
+                );
+                tbody.innerHTML = filtrados.map(u => `
+                    <tr data-id="${u.id}">
+                        <td>${u.id}</td>
+                        <td>${escapeHtml(u.nome)}</td>
+                        <td>${escapeHtml(u.apelido || '')}</td>
+                        <td>${escapeHtml(u.cidade || '')}</td>
+                        <td>${(u.fotos || []).length}</td>
+                        <td>—</td>
+                    </tr>
+                `).join('') || '<tr><td colspan="6" class="placeholder-text">Nenhum registro</td></tr>';
 
-            tbody.querySelectorAll('tr[data-id]').forEach(tr => {
-                tr.addEventListener('click', () => {
-                    tbody.querySelectorAll('tr').forEach(t => t.classList.remove('selected'));
-                    tr.classList.add('selected');
+                tbody.querySelectorAll('tr[data-id]').forEach(tr => {
+                    tr.addEventListener('click', () => {
+                        tbody.querySelectorAll('tr').forEach(t => t.classList.remove('selected'));
+                        tr.classList.add('selected');
+                    });
+                    tr.addEventListener('dblclick', () => this._abrirDoModal(parseInt(tr.dataset.id)));
                 });
-                tr.addEventListener('dblclick', () => this._abrirDoModal(parseInt(tr.dataset.id)));
-            });
-        };
+            };
 
-        popular();
-        filtro.value = '';
-        filtro.oninput = () => popular(filtro.value);
+            popular();
+            filtro.value = '';
+            filtro.oninput = () => popular(filtro.value);
 
-        document.getElementById('btn-reg-abrir').onclick = () => {
-            const sel = tbody.querySelector('tr.selected');
-            if (!sel) { Toast.warning('Selecione um registro.'); return; }
-            this._abrirDoModal(parseInt(sel.dataset.id));
-        };
+            document.getElementById('btn-reg-abrir').onclick = () => {
+                const sel = tbody.querySelector('tr.selected');
+                if (!sel) { Toast.warning('Selecione um registro.'); return; }
+                this._abrirDoModal(parseInt(sel.dataset.id));
+            };
 
-        document.getElementById('btn-reg-excluir').onclick = async () => {
-            const sel = tbody.querySelector('tr.selected');
-            if (!sel) { Toast.warning('Selecione um registro.'); return; }
-            const id = parseInt(sel.dataset.id);
-            const ok = await Confirm.abrir('Excluir', `Excluir registro ID ${id}?`);
-            if (!ok) return;
-            try {
-                await API.excluirRegistro(id);
-                Toast.success('Excluído.');
-                Modal.fechar('modal-registros');
-                Dashboard.atualizar();
-            } catch (e) {
-                Toast.error(e.message);
-            }
-        };
+            document.getElementById('btn-reg-excluir').onclick = async () => {
+                const sel = tbody.querySelector('tr.selected');
+                if (!sel) { Toast.warning('Selecione um registro.'); return; }
+                const id = parseInt(sel.dataset.id);
+                const ok = await Confirm.abrir('Excluir', `Excluir registro ID ${id}?`);
+                if (!ok) return;
+                try {
+                    await API.excluirRegistro(id);
+                    Toast.success('Excluído.');
+                    Modal.fechar('modal-registros');
+                    Dashboard.atualizar();
+                } catch (e) {
+                    Toast.error(e.message);
+                }
+            };
 
-        Modal.abrir('modal-registros');
+            Modal.abrir('modal-registros');
+        } catch (e) {
+            Toast.error('Erro ao listar: ' + e.message);
+        }
     },
 
     async _abrirDoModal(id) {
         try {
-            const u = await API.buscarRegistro(id);
+            const raw = await API.buscarRegistro(id);
+            const u = _normalizarRegistro(raw);
             Modal.fechar('modal-registros');
             this.preencher(u);
             TabsManager.ativar('cadastros');
@@ -362,6 +405,7 @@ const Cadastro = {
     },
 
     preencher(u) {
+        u = _normalizarRegistro(u);
         AppState.registroAtualId = u.id;
         document.getElementById('cad-id').value = u.id;
         document.getElementById('cad-nome').value = u.nome || '';
@@ -373,17 +417,18 @@ const Cadastro = {
         document.getElementById('cad-cidade').value = u.cidade || '';
         document.getElementById('cad-observacoes').value = u.observacoes || '';
 
-        this.setListaDinamica('lista-tatuagens', u.tatuagens || []);
-        this.setListaDinamica('lista-sinais', u.sinais || []);
+        this.setListaDinamica('lista-tatuagens', u.tatuagens);
+        this.setListaDinamica('lista-sinais', u.sinais);
 
         this.fotos = (u.fotos || []).map(f => ({
-            dataUrl: f.dataUrl,
+            dataUrl: f.dataUrl || f.imagem,
             status: 'ok'
-        }));
+        })).filter(f => f.dataUrl);
         this.renderizarFotos();
     },
 
     abrirDetalhes(u) {
+        u = _normalizarRegistro(u);
         const body = document.getElementById('modal-detalhes-body');
         document.getElementById('modal-detalhes-titulo').textContent = `Registro - ${u.nome}`;
         const fotos = u.fotos || [];
@@ -391,8 +436,8 @@ const Cadastro = {
             ? `<img src="${fotos[0].dataUrl}" style="width:180px;height:180px;object-fit:cover;border-radius:8px;border:1px solid var(--border);">`
             : `<div style="width:180px;height:180px;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--fg-secondary);">Sem foto</div>`;
 
-        const tat = (u.tatuagens || []).map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
-        const sin = (u.sinais || []).map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
+        const tat = u.tatuagens.map(t => `<li>${escapeHtml(t)}</li>`).join('') || '<li>—</li>';
+        const sin = u.sinais.map(s => `<li>${escapeHtml(s)}</li>`).join('') || '<li>—</li>';
 
         body.innerHTML = `
             <div style="display:flex; gap:16px;">
@@ -418,7 +463,8 @@ const Cadastro = {
             Toast.warning('Nenhum registro carregado.');
             return;
         }
-        API.buscarRegistro(AppState.registroAtualId).then(u => {
+        API.buscarRegistro(AppState.registroAtualId).then(raw => {
+            const u = _normalizarRegistro(raw);
             const texto = `
 REGISTRO: ${u.nome}
 ID: ${u.id}
@@ -431,10 +477,10 @@ Cidade: ${u.cidade || '—'}
 Cadastro: ${u.data_cadastro || '—'}
 
 TATUAGENS:
-${(u.tatuagens || ['—']).map(t => '• ' + t).join('\n')}
+${(u.tatuagens.length ? u.tatuagens : ['—']).map(t => '• ' + t).join('\n')}
 
 SINAIS:
-${(u.sinais || ['—']).map(s => '• ' + s).join('\n')}
+${(u.sinais.length ? u.sinais : ['—']).map(s => '• ' + s).join('\n')}
 
 OBSERVAÇÕES:
 ${u.observacoes || '—'}
