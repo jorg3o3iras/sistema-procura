@@ -54,8 +54,9 @@ const API = {
     },
 
     // ============ BUSCA FACIAL ============
-    buscaFacial(imagemBase64) {
-        return this.request('POST', '/api/busca-facial', { imagem: imagemBase64 });
+    // Recebe array de 128 números (descritor facial gerado pelo face-api.js no navegador)
+    buscaFacial(descriptor) {
+        return this.request('POST', '/api/busca-facial', { descriptor });
     },
 
     // ============ AUDITORIA ============
