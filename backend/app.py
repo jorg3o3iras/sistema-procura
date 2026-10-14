@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Procura v3.4 - Backend Flask + Neon PostgreSQL
-Reconhecimento facial via Hugging Face Inference API (CLIP + fallback)
+Reconhecimento por similaridade de imagem via Hugging Face (novo endpoint)
 """
 import os
 import base64
@@ -34,10 +34,10 @@ FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 PORT = int(os.environ.get("PORT", 5000))
 
-# Modelos do Hugging Face (tentados em ordem)
+# Modelos HF — novo endpoint (router.huggingface.co)
 HF_MODELS = [
-    "https://api-inference.huggingface.co/models/sentence-transformers/clip-ViT-B-32",
-    "https://api-inference.huggingface.co/models/openai/clip-vit-base-patch32",
+    "https://router.huggingface.co/hf-inference/models/sentence-transformers/clip-ViT-B-32",
+    "https://router.huggingface.co/hf-inference/models/openai/clip-vit-base-patch32",
 ]
 
 FACE_THRESHOLD = 0.25
@@ -120,11 +120,9 @@ def verificar_senha(senha: str, hash_arm: str) -> bool:
 # FACE — Hugging Face
 # ============================================================
 def _extrair_embedding_da_resposta(dados):
-    """Tenta extrair embedding de qualquer formato comum do HF."""
     if dados is None:
         return None
 
-    # Formato dict
     if isinstance(dados, dict):
         embs = dados.get("embeddings") or dados.get("embedding")
         if embs:
@@ -132,13 +130,12 @@ def _extrair_embedding_da_resposta(dados):
                 return np.array(embs[0], dtype=np.float32)
             if isinstance(embs, list) and embs and isinstance(embs[0], (int, float)):
                 return np.array(embs, dtype=np.float32)
+        return None
 
-    # Formato lista
     if isinstance(dados, list):
         if len(dados) == 0:
             return None
         if isinstance(dados[0], list):
-            # Pode ser [[emb], [emb]] ou [[emb]]
             inner = dados[0]
             if isinstance(inner, list) and inner and isinstance(inner[0], (int, float)):
                 return np.array(inner, dtype=np.float32)
@@ -150,7 +147,6 @@ def _extrair_embedding_da_resposta(dados):
 
 
 def gerar_embedding(img_bytes: bytes):
-    """Tenta gerar embedding em cada modelo, na ordem de HF_MODELS."""
     if not HF_TOKEN:
         return None
 
@@ -171,8 +167,7 @@ def gerar_embedding(img_bytes: bytes):
             if emb is not None:
                 print(f"[HF] OK via {modelo} (dim={len(emb)})")
                 return emb
-            else:
-                print(f"[HF] {modelo} retornou formato inesperado: {str(dados)[:200]}")
+            print(f"[HF] {modelo} formato inesperado: {str(dados)[:200]}")
         except Exception as e:
             print(f"[HF] {modelo} erro: {e}")
             continue
@@ -224,7 +219,7 @@ def home():
         "app": "Sistema de Procura API",
         "version": "3.4",
         "face_recognition": FACE_OK,
-        "modelos": HF_MODELS,
+        "endpoint": "router.huggingface.co",
         "bcrypt": BCRYPT_OK,
         "status": "online"
     })
@@ -246,7 +241,6 @@ def health():
 # ============================================================
 @app.route("/api/debug-hf", methods=["GET"])
 def debug_hf():
-    """Diagnóstico: testa se o HF está acessível e o que ele responde."""
     resultado = {
         "hf_token_presente": bool(HF_TOKEN),
         "hf_token_tamanho": len(HF_TOKEN) if HF_TOKEN else 0,
@@ -254,7 +248,7 @@ def debug_hf():
         "modelos": HF_MODELS,
     }
 
-    # Teste 1: quem sou eu
+    # whoami
     try:
         r = requests.get(
             "https://huggingface.co/api/whoami-v2",
@@ -266,7 +260,7 @@ def debug_hf():
     except Exception as e:
         resultado["whoami_erro"] = str(e)
 
-    # Teste 2: chamar cada modelo com imagem 1x1 PNG
+    # Teste com imagem 1x1 PNG
     img_min = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
         "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -476,7 +470,7 @@ def busca_facial():
 
     if enc_entrada is None:
         return jsonify({
-            "erro": "Nao foi possivel gerar embedding. Veja /api/debug-hf para diagnostico.",
+            "erro": "Nao foi possivel gerar embedding. Veja /api/debug-hf.",
             "matches": [],
             "disponivel": True
         }), 400
@@ -557,8 +551,8 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  Sistema de Procura API v3.4")
     print(f"  bcrypt:            {'OK' if BCRYPT_OK else 'AUSENTE'}")
-    print(f"  Hugging Face:      {'OK' if FACE_OK else 'AUSENTE (HF_TOKEN vazio)'}")
-    print(f"  Modelos:           {HF_MODELS}")
+    print(f"  Hugging Face:      {'OK' if FACE_OK else 'AUSENTE'}")
+    print(f"  Endpoint:          router.huggingface.co (novo)")
     print(f"  Porta:             {PORT}")
     print("=" * 60)
     app.run(host="0.0.0.0", port=PORT, debug=False)
