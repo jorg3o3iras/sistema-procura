@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Procura v3.3</title>
+    <link rel="stylesheet" href="css/themes.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+</head>
+<body data-theme="dark">
+
+    <!-- ============================================
+         TELA DE LOGIN
+         ============================================ -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="login-card">
+                <h1 class="login-title">🔐 Sistema de Procura</h1>
+                <p class="login-subtitle">Faça login para continuar</p>
+                
+                <form id="login-form" class="login-form">
+                    <div class="form-group">
+                        <label for="login-user">Usuário</label>
+                        <input type="text" id="login-user" placeholder="Usuário" autocomplete="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-pass">Senha</label>
+                        <input type="password" id="login-pass" placeholder="Senha" autocomplete="current-password" required>
+                    </div>
+                    <div class="login-actions">
+                        <button type="submit" class="btn btn-primary btn-lg">Entrar</button>
+                        <button type="button" class="btn btn-secondary btn-lg" id="btn-login-sair">Sair</button>
+                    </div>
+                </form>
+                <p class="login-hint">
+                    <small>Primeiro acesso? Use: <b>admin</b> / <b>admin123</b></small>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================
+         APLICAÇÃO PRINCIPAL
+         ============================================ -->
+    <div id="app-screen" class="screen">
+        <!-- Toolbar Superior -->
+        <header class="toolbar">
+            <div class="toolbar-left">
+                <span class="app-logo">🔍</span>
+                <span class="app-name">Sistema de Procura</span>
+                <span class="app-version">v3.3</span>
+            </div>
+            <div class="toolbar-center">
+                <button class="toolbar-btn" data-action="novo" title="Novo Cadastro (Ctrl+N)">🆕 Novo</button>
+                <button class="toolbar-btn" data-action="salvar" title="Salvar (Ctrl+S)">💾 Salvar</button>
+                <button class="toolbar-btn" data-action="pesquisar" title="Pesquisar">🔍 Pesquisar</button>
+                <button class="toolbar-btn" data-action="imagem" title="Busca por Imagem">📷 Imagem</button>
+                <button class="toolbar-btn" data-action="dashboard" title="Dashboard">📊 Dashboard</button>
+                <button class="toolbar-btn" data-action="auditoria" title="Auditoria">🛡️ Auditoria</button>
+                <button class="toolbar-btn" data-action="backup" title="Backup">💾 Backup</button>
+            </div>
+            <div class="toolbar-right">
+                <span class="user-info">👤 <span id="user-display">admin</span></span>
+                <button class="toolbar-btn theme-toggle" id="theme-toggle" title="Alternar Tema (Ctrl+T)">🌗</button>
+                <button class="toolbar-btn" id="btn-logout" title="Sair">🚪</button>
+            </div>
+        </header>
+
+        <!-- Menu de Navegação por Abas -->
+        <nav class="tabs-nav">
+            <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
+            <button class="tab-btn" data-tab="cadastros">📝 Cadastros</button>
+            <button class="tab-btn" data-tab="pesquisa">🔍 Pesquisa</button>
+            <button class="tab-btn" data-tab="busca-imagem">📷 Busca por Imagem</button>
+            <button class="tab-btn" data-tab="auditoria">🛡️ Auditoria</button>
+        </nav>
+
+        <!-- Conteúdo das Abas -->
+        <main class="tabs-content">
+            
+            <!-- ==================== DASHBOARD ==================== -->
+            <section class="tab-panel active" id="tab-dashboard">
+                <div class="panel-header">
+                    <h2>📊 Dashboard - Sistema de Procura v3.3</h2>
+                    <p class="subtitle">Visão geral do sistema</p>
+                </div>
+
+                <div class="stats-cards">
+                    <div class="stat-card" data-color="accent">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-value" id="stat-total">0</div>
+                        <div class="stat-label">Total de Registros</div>
+                    </div>
+                    <div class="stat-card" data-color="success">
+                        <div class="stat-icon">📷</div>
+                        <div class="stat-value" id="stat-com-foto">0</div>
+                        <div class="stat-label">Com Foto</div>
+                    </div>
+                    <div class="stat-card" data-color="info">
+                        <div class="stat-icon">🧠</div>
+                        <div class="stat-value" id="stat-indexados">0</div>
+                        <div class="stat-label">Indexados (rosto)</div>
+                    </div>
+                    <div class="stat-card" data-color="warning">
+                        <div class="stat-icon">📄</div>
+                        <div class="stat-value" id="stat-com-pdf">0</div>
+                        <div class="stat-label">Com Documentos</div>
+                    </div>
+                    <div class="stat-card" data-color="danger">
+                        <div class="stat-icon">❌</div>
+                        <div class="stat-value" id="stat-sem-foto">0</div>
+                        <div class="stat-label">Sem Foto</div>
+                    </div>
+                </div>
+
+                <div class="section-divider"></div>
+
+                <h3 class="section-title">🕐 Últimos Cadastros</h3>
+                <div class="table-wrapper">
+                    <table class="data-table" id="table-ultimos">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nome</th>
+                                <th>Cidade</th>
+                                <th>Data Cadastro</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div class="panel-actions">
+                    <button class="btn btn-primary" id="btn-refresh-dashboard">🔄 Atualizar</button>
+                </div>
+            </section>
+
+            <!-- ==================== CADASTROS ==================== -->
+            <section class="tab-panel" id="tab-cadastros">
+                <div class="panel-header">
+                    <h2>📝 Cadastro de Registros</h2>
+                    <p class="subtitle">Preencha os dados abaixo. Campos com * são obrigatórios.</p>
+                </div>
+
+                <div class="cadastro-layout">
+                    <!-- Coluna do Formulário -->
+                    <div class="cadastro-form-col">
+                        
+                        <!-- Grupo: Informações Pessoais -->
+                        <fieldset class="form-group-box">
+                            <legend>👤 Informações Pessoais</legend>
+                            <div class="form-grid">
+                                <div class="form-row row-1">
+                                    <div class="form-field field-id">
+                                        <label>ID:</label>
+                                        <input type="text" id="cad-id" readonly placeholder="ID">
+                                    </div>
+                                    <div class="form-field field-nome">
+                                        <label>Nome: *</label>
+                                        <input type="text" id="cad-nome" placeholder="Nome completo *">
+                                    </div>
+                                </div>
+                                <div class="form-row row-2">
+                                    <div class="form-field field-apelido">
+                                        <label>Apelido:</label>
+                                        <input type="text" id="cad-apelido" placeholder="Como é conhecido">
+                                    </div>
+                                    <div class="form-field field-rg">
+                                        <label>RG:</label>
+                                        <input type="text" id="cad-rg" placeholder="Ex: 12.345.678-9">
+                                    </div>
+                                    <div class="form-field field-nasc">
+                                        <label>Nascimento:</label>
+                                        <input type="text" id="cad-nascimento" placeholder="DD/MM/AAAA" maxlength="10">
+                                    </div>
+                                </div>
+                                <div class="form-row row-3">
+                                    <div class="form-field field-cor">
+                                        <label>Cor:</label>
+                                        <input type="text" id="cad-cor" placeholder="Cor">
+                                    </div>
+                                    <div class="form-field field-altura">
+                                        <label>Altura:</label>
+                                        <input type="text" id="cad-altura" placeholder="Ex: 1.75">
+                                    </div>
+                                    <div class="form-field field-cidade">
+                                        <label>Cidade:</label>
+                                        <input type="text" id="cad-cidade" placeholder="Cidade">
+                                    </div>
+                                </div>
+                            </div>
+                        </fieldset>
+
+                        <!-- Grupo: Características -->
+                        <fieldset class="form-group-box">
+                            <legend>🔍 Características</legend>
+                            
+                            <div class="dynamic-section">
+                                <label class="dynamic-label">🎨 Tatuagens</label>
+                                <div id="lista-tatuagens" class="dynamic-list"></div>
+                                <button type="button" class="btn btn-dashed" data-add-field="lista-tatuagens" data-placeholder="Descrição da tatuagem (ex: dragão no braço)">
+                                    ➕ Adicionar Tatuagem
+                                </button>
+                            </div>
+
+                            <div class="section-divider"></div>
+
+                            <div class="dynamic-section">
+                                <label class="dynamic-label">🔎 Sinais Particulares</label>
+                                <div id="lista-sinais" class="dynamic-list"></div>
+                                <button type="button" class="btn btn-dashed" data-add-field="lista-sinais" data-placeholder="Descrição do sinal (ex: cicatriz no queixo)">
+                                    ➕ Adicionar Sinal
+                                </button>
+                            </div>
+                        </fieldset>
+
+                        <!-- Grupo: Observações -->
+                        <fieldset class="form-group-box">
+                            <legend>📋 Observações</legend>
+                            <textarea id="cad-observacoes" rows="4" placeholder="Informações adicionais..."></textarea>
+                        </fieldset>
+                    </div>
+
+                    <!-- Coluna de Fotos -->
+                    <div class="cadastro-fotos-col">
+                        <div class="fotos-header">
+                            <h3>📷 Fotos do Registro (<span id="fotos-count">0</span>/5)</h3>
+                        </div>
+                        <div class="fotos-dica">
+                            💡 Dica: adicione de 3 a 5 fotos com ângulos e iluminações diferentes para melhorar a precisão da busca.
+                        </div>
+                        <div class="fotos-grid" id="fotos-grid">
+                            <!-- Cards de fotos serão inseridos via JS -->
+                        </div>
+                        <div class="fotos-actions">
+                            <button type="button" class="btn btn-primary btn-lg" id="btn-add-foto">
+                                ➕ Adicionar Foto
+                            </button>
+                        </div>
+                        <input type="file" id="foto-input" accept="image/*" multiple hidden>
+                    </div>
+                </div>
+
+                <!-- Botões de Ação -->
+                <div class="panel-actions cadastro-actions">
+                    <button class="btn btn-primary" id="btn-cadastrar">💾 Cadastrar</button>
+                    <button class="btn btn-success" id="btn-atualizar">✏️ Atualizar</button>
+                    <button class="btn btn-secondary" id="btn-limpar">🧹 Limpar</button>
+                    <button class="btn btn-danger" id="btn-excluir">🗑️ Excluir</button>
+                    <button class="btn btn-secondary" id="btn-listar">📋 Cadastrados</button>
+                    <button class="btn btn-info" id="btn-gerar-pdf">📄 Salvar PDF</button>
+                </div>
+            </section>
+
+            <!-- ==================== PESQUISA ==================== -->
+            <section class="tab-panel" id="tab-pesquisa">
+                <div class="panel-header">
+                    <h2>🔍 Pesquisa por Características</h2>
+                    <p class="subtitle">Apenas campos preenchidos serão usados como filtro.</p>
+                </div>
+
+                <div class="pesquisa-layout">
+                    <!-- Painel de Filtros -->
+                    <div class="pesquisa-filtros">
+                        <fieldset class="form-group-box">
+                            <legend>👤 Informações Pessoais</legend>
+                            <div class="form-grid">
+                                <div class="form-row row-1">
+                                    <div class="form-field field-id">
+                                        <label>ID:</label>
+                                        <input type="text" id="pesq-id" placeholder="Ex: 5">
+                                    </div>
+                                    <div class="form-field field-nome">
+                                        <label>Nome:</label>
+                                        <input type="text" id="pesq-nome" placeholder="Nome">
+                                    </div>
+                                </div>
+                                <div class="form-row row-2">
+                                    <div class="form-field field-apelido">
+                                        <label>Apelido:</label>
+                                        <input type="text" id="pesq-apelido" placeholder="Apelido">
+                                    </div>
+                                    <div class="form-field field-rg">
+                                        <label>RG:</label>
+                                        <input type="text" id="pesq-rg" placeholder="RG">
+                                    </div>
+                                    <div class="form-field field-nasc">
+                                        <label>Nascimento:</label>
+                                        <input type="text" id="pesq-nascimento" placeholder="DD/MM/AAAA">
+                                    </div>
+                                </div>
+                                <div class="form-row row-3">
+                                    <div class="form-field field-cor">
+                                        <label>Cor:</label>
+                                        <input type="text" id="pesq-cor" placeholder="Cor">
+                                    </div>
+                                    <div class="form-field field-altura">
+                                        <label>Altura:</label>
+                                        <input type="text" id="pesq-altura" placeholder="Altura">
+                                    </div>
+                                    <div class="form-field field-cidade">
+                                        <label>Cidade:</label>
+                                        <input type="text" id="pesq-cidade" placeholder="Cidade">
+                                    </div>
+                                </div>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="form-group-box">
+                            <legend>🔍 Características</legend>
+                            <div class="dynamic-section">
+                                <label class="dynamic-label">🎨 Tatuagens</label>
+                                <div id="pesq-lista-tatuagens" class="dynamic-list"></div>
+                                <button type="button" class="btn btn-dashed" data-add-field="pesq-lista-tatuagens" data-placeholder="Parte da descrição (ex: dragão)">
+                                    ➕ Adicionar Tatuagem
+                                </button>
+                            </div>
+                            <div class="section-divider"></div>
+                            <div class="dynamic-section">
+                                <label class="dynamic-label">🔎 Sinais Particulares</label>
+                                <div id="pesq-lista-sinais" class="dynamic-list"></div>
+                                <button type="button" class="btn btn-dashed" data-add-field="pesq-lista-sinais" data-placeholder="Parte da descrição (ex: cicatriz)">
+                                    ➕ Adicionar Sinais
+                                </button>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="form-group-box">
+                            <legend>📋 Observações</legend>
+                            <input type="text" id="pesq-obs" placeholder="Buscar nas observações...">
+                        </fieldset>
+
+                        <div class="pesquisa-actions">
+                            <button class="btn btn-primary btn-lg" id="btn-procurar">🔎 Procurar</button>
+                            <button class="btn btn-info btn-lg" id="btn-pesq-preencher">📋 Preencher Formulário</button>
+                            <button class="btn btn-secondary btn-lg" id="btn-pesq-limpar">🧹 Limpar</button>
+                        </div>
+                    </div>
+
+                    <!-- Painel de Resultados -->
+                    <div class="pesquisa-resultados">
+                        <div class="results-header">
+                            <span id="pesq-resultado-texto">Nenhuma pesquisa realizada ainda.</span>
+                        </div>
+                        <div class="table-wrapper flex-1">
+                            <table class="data-table" id="table-pesquisa">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Nome</th>
+                                        <th>Apelido</th>
+                                        <th>RG</th>
+                                        <th>Cidade</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <fieldset class="form-group-box detalhes-box">
+                            <legend>👤 Detalhes do Registro Selecionado</legend>
+                            <div class="detalhes-content">
+                                <div class="detalhes-foto" id="pesq-detalhe-foto">Sem foto</div>
+                                <div class="detalhes-info" id="pesq-detalhe-info">
+                                    <p class="placeholder-text">Selecione um registro na tabela para ver os detalhes.</p>
+                                </div>
+                            </div>
+                        </fieldset>
+
+                        <div class="panel-actions">
+                            <button class="btn btn-primary" id="btn-pesq-abrir">📂 Abrir Registro Completo</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== BUSCA POR IMAGEM ==================== -->
+            <section class="tab-panel" id="tab-busca-imagem">
+                <div class="panel-header">
+                    <h2>📷 Pesquisa por Imagem</h2>
+                    <p class="subtitle">Use foto da webcam ou disco para encontrar correspondências.</p>
+                </div>
+
+                <div class="busca-imagem-layout">
+                    <!-- Coluna Esquerda: Entrada -->
+                    <div class="busca-entrada">
+                        <label class="field-label">Imagem de Entrada:</label>
+                        <div class="preview-box" id="preview-imagem">
+                            <span class="placeholder-text">Nenhuma imagem</span>
+                        </div>
+
+                        <div class="busca-botoes">
+                            <button class="btn btn-secondary" id="btn-inserir-foto">📁 Inserir Foto</button>
+                            <button class="btn btn-secondary" id="btn-abrir-webcam">🎥 Abrir Webcam</button>
+                            <button class="btn btn-secondary" id="btn-capturar-webcam" disabled>📸 Capturar</button>
+                        </div>
+
+                        <video id="webcam-video" autoplay playsinline hidden></video>
+                        <canvas id="webcam-canvas" hidden></canvas>
+
+                        <button class="btn btn-primary btn-lg" id="btn-encontrar">🔍 Encontrar Correspondências</button>
+                        <button class="btn btn-info btn-lg" id="btn-img-preencher" disabled>📋 Preencher Formulário</button>
+                        <button class="btn btn-secondary" id="btn-img-limpar">🧹 Limpar</button>
+                    </div>
+
+                    <!-- Coluna Direita: Resultados -->
+                    <div class="busca-resultados">
+                        <label class="field-label">Correspondências:</label>
+                        <div class="matches-grid" id="matches-grid">
+                            <!-- Cards gerados via JS -->
+                        </div>
+
+                        <fieldset class="form-group-box detalhes-box">
+                            <legend>👤 Pessoa Encontrada</legend>
+                            <div class="detalhes-content">
+                                <div class="detalhes-foto" id="img-detalhe-foto">Sem dados</div>
+                                <div class="detalhes-info" id="img-detalhe-info">
+                                    <p class="placeholder-text">Os dados do registro mais provável aparecerão aqui após a busca.</p>
+                                </div>
+                            </div>
+                        </fieldset>
+
+                        <div class="panel-actions">
+                            <button class="btn btn-primary" id="btn-img-abrir" disabled>📂 Abrir Registro Completo</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== AUDITORIA ==================== -->
+            <section class="tab-panel" id="tab-auditoria">
+                <div class="panel-header">
+                    <h2>🛡️ Auditoria</h2>
+                    <p class="subtitle">Últimas ações realizadas no sistema</p>
+                </div>
+
+                <div class="auditoria-toolbar">
+                    <label>Mostrar:</label>
+                    <select id="audit-limite">
+                        <option value="100">100</option>
+                        <option value="500" selected>500</option>
+                        <option value="1000">1000</option>
+                        <option value="5000">5000</option>
+                    </select>
+                    <button class="btn btn-primary" id="btn-audit-refresh">🔄 Atualizar</button>
+                </div>
+
+                <div class="table-wrapper flex-1">
+                    <table class="data-table" id="table-auditoria">
+                        <thead>
+                            <tr>
+                                <th>Data/Hora</th>
+                                <th>Usuário</th>
+                                <th>Ação</th>
+                                <th>Alvo (ID)</th>
+                                <th>Detalhes</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <span id="status-text">👤 admin | 📊 0 registros | 📷 0 com foto | 🧠 0 indexados | 📄 0 com PDF | v3.3</span>
+        </footer>
+    </div>
+
+    <!-- ============================================
+         MODAIS
+         ============================================ -->
+    
+    <!-- Modal: Lista de Registros -->
+    <div class="modal-overlay" id="modal-registros">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h3>📋 Registros Cadastrados</h3>
+                <button class="modal-close" data-close="modal-registros">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-filter">
+                    <label>🔍 Filtrar:</label>
+                    <input type="text" id="filtro-registros" placeholder="Digite para filtrar por nome...">
+                </div>
+                <div class="table-wrapper">
+                    <table class="data-table" id="table-registros">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Nome</th>
+                                <th>Apelido</th>
+                                <th>Cidade</th>
+                                <th>Fotos</th>
+                                <th>Rosto</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btn-reg-abrir">📂 Abrir</button>
+                <button class="btn btn-danger" id="btn-reg-excluir">🗑️ Excluir</button>
+                <div class="spacer"></div>
+                <button class="btn btn-secondary" data-close="modal-registros">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Detalhes do Registro -->
+    <div class="modal-overlay" id="modal-detalhes">
+        <div class="modal modal-md">
+            <div class="modal-header">
+                <h3 id="modal-detalhes-titulo">Registro</h3>
+                <button class="modal-close" data-close="modal-detalhes">✕</button>
+            </div>
+            <div class="modal-body" id="modal-detalhes-body">
+                <!-- Preenchido via JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-close="modal-detalhes">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Gerenciar PDFs -->
+    <div class="modal-overlay" id="modal-pdfs">
+        <div class="modal modal-md">
+            <div class="modal-header">
+                <h3>📄 Documentos PDF</h3>
+                <button class="modal-close" data-close="modal-pdfs">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="pdf-registro-nome" class="text-muted"></p>
+                <ul class="pdf-list" id="pdf-list"></ul>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="btn-pdf-add">➕ Adicionar PDF</button>
+                <button class="btn btn-info" id="btn-pdf-view">👁️ Visualizar</button>
+                <button class="btn btn-danger" id="btn-pdf-del">❌ Excluir</button>
+                <div class="spacer"></div>
+                <button class="btn btn-secondary" data-close="modal-pdfs">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Confirmação -->
+    <div class="modal-overlay" id="modal-confirm">
+        <div class="modal modal-sm">
+            <div class="modal-header">
+                <h3 id="confirm-titulo">Confirmação</h3>
+            </div>
+            <div class="modal-body">
+                <p id="confirm-mensagem">Tem certeza?</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="confirm-yes">Sim</button>
+                <button class="btn btn-secondary" id="confirm-no">Não</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast de notificação -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay" hidden>
+        <div class="spinner"></div>
+        <p id="loading-text">Processando...</p>
+    </div>
+
+    <script src="js/theme.js"></script>
+    <script src="js/app.js"></script>
+    <script src="js/dashboard.js"></script>
+    <script src="js/cadastro.js"></script>
+    <script src="js/pesquisa.js"></script>
+    <script src="js/busca-imagem.js"></script>
+    <script src="js/auditoria.js"></script>
+</body>
+</html>
